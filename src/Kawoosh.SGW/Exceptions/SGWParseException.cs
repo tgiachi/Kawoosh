@@ -1,4 +1,5 @@
 using Kawoosh.SGW.Data;
+using Kawoosh.SGW.Data.Diagnostic;
 
 namespace Kawoosh.SGW.Exceptions;
 
@@ -10,10 +11,13 @@ public class SGWParseException : Exception
 {
     public IReadOnlyList<SGWDiagnostic> Diagnostics { get; }
 
-    public SGWParseException(IReadOnlyList<SGWDiagnostic> diagnostics)
+    public string FilePath { get; }
+
+    public SGWParseException(IReadOnlyList<SGWDiagnostic> diagnostics, string filePath = null)
         : base(BuildMessage(diagnostics))
     {
         Diagnostics = diagnostics;
+        FilePath = filePath;
     }
 
     private static string BuildMessage(IReadOnlyList<SGWDiagnostic> diagnostics)

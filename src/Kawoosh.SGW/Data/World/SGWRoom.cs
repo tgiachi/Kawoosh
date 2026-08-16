@@ -1,6 +1,6 @@
 using Kawoosh.SGW.Types;
 
-namespace Kawoosh.SGW.Data;
+namespace Kawoosh.SGW.Data.World;
 
 public class SGWRoom
 {
@@ -14,6 +14,12 @@ public class SGWRoom
     public List<SGWExtraDescription> Extras { get; set; } = [];
 
     public Dictionary<string, string> Scripts { get; set; } = new();
+
+    /// <summary>File this room was read from, used as the location of world-level diagnostics.</summary>
+    public string SourceFile { get; set; } = string.Empty;
+
+    /// <summary>1-based line of the '@room' header inside <see cref="SourceFile"/>.</summary>
+    public int SourceLine { get; set; }
 
     public void AddScript(string scriptName, string scriptContent)
     {

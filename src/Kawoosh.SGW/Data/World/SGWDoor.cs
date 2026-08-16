@@ -1,8 +1,8 @@
-namespace Kawoosh.SGW.Data;
+namespace Kawoosh.SGW.Data.World;
 
 public class SGWDoor
 {
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; set; }
     public bool IsLocked { get; set; }
     public int? KeyVnum { get; set; }
 

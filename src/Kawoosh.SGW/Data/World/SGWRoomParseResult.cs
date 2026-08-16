@@ -1,6 +1,7 @@
+using Kawoosh.SGW.Data.Diagnostic;
 using Kawoosh.SGW.Types;
 
-namespace Kawoosh.SGW.Data;
+namespace Kawoosh.SGW.Data.World;
 
 /// <summary>
 /// Outcome of a non-throwing room parse: the room when it is usable, plus every

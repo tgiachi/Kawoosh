@@ -1,4 +1,5 @@
 using Kawoosh.SGW.Data;
+using Kawoosh.SGW.Data.World;
 using Kawoosh.SGW.Exceptions;
 using Kawoosh.SGW.Services;
 using Kawoosh.SGW.Types;
@@ -1139,15 +1140,21 @@ public class SGWFileParserTests
     }
 
     [Test]
-    public void TryParseRoom_VnumZero_ReportsVnumOutOfRange()
+    public void TryParseRoom_VnumZero_IsAccepted()
     {
         var result = Parse(
-            "@room 0 \"A Street\"",
-            "sector: city",
+            "@room 0 \"The Void\"",
+            "sector: air",
+            "",
+            "Nothing at all.",
             "@end"
         );
 
-        Assert.That(CodesOf(result), Does.Contain(SGWDiagnosticCode.VnumOutOfRange));
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Diagnostics, Is.Empty);
+            Assert.That(result.Room!.Id, Is.Zero);
+        });
     }
 
     [Test]
@@ -1530,5 +1537,218 @@ public class SGWFileParserTests
         )));
 
         Assert.That(exception!.Diagnostics.Select(d => d.Code), Does.Contain(SGWDiagnosticCode.UnknownSector));
+    }
+
+    // ------------------------------------------------------- whole-file parse
+
+    [Test]
+    public void TryParseFile_SingleRoom_ReturnsThatRoom()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The prose.",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms, Has.Count.EqualTo(1));
+            Assert.That(result.Rooms[0].Id, Is.EqualTo(3001));
+            Assert.That(result.Diagnostics, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_MultipleRooms_ReturnsEveryRoom()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The first room.",
+            "> north 3002",
+            "@end",
+            "",
+            "@room 3002 \"Another Street\"",
+            "sector: city",
+            "",
+            "The second room.",
+            "> south 3001",
+            "@end",
+            "",
+            "@room 3003 \"A Third Street\"",
+            "sector: city",
+            "",
+            "The third room.",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms.Select(r => r.Id), Is.EqualTo(new[] { 3001, 3002, 3003 }));
+            Assert.That(result.Diagnostics, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_RecordsSourceFileAndHeaderLineOfEachRoom()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The first room.",
+            "@end",
+            "",
+            "@room 3002 \"Another Street\"",
+            "sector: city",
+            "",
+            "The second room.",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms[0].SourceFile, Is.EqualTo("gate.sgw"));
+            Assert.That(result.Rooms[0].SourceLine, Is.EqualTo(1));
+            Assert.That(result.Rooms[1].SourceLine, Is.EqualTo(7));
+        });
+    }
+
+    [Test]
+    public void TryParseFile_RecordsSourceLineOfEachExit()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The prose.",
+            "> north 3002",
+            "> south 3003",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.That(result.Rooms[0].Exits.Select(e => e.SourceLine), Is.EqualTo(new[] { 5, 6 }));
+    }
+
+    [Test]
+    public void TryParseFile_EmptyContent_ReturnsNoRooms()
+    {
+        var result = _parser.TryParseFile(string.Empty, "empty.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms, Is.Empty);
+            Assert.That(result.Diagnostics, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_OnlyCommentsAndBlanks_ReturnsNoRooms()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "# a header comment",
+            "",
+            "# another comment",
+            ""
+        ), "empty.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms, Is.Empty);
+            Assert.That(result.Diagnostics, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_TrailingCommentsAfterLastRoom_ProduceNoDiagnostics()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The prose.",
+            "@end",
+            "",
+            "# nothing more to see here",
+            ""
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms, Has.Count.EqualTo(1));
+            Assert.That(result.Diagnostics, Is.Empty);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_RoomWithError_IsExcludedButKeepsItsDiagnostics()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: nowhere",
+            "",
+            "The prose.",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms, Is.Empty);
+            Assert.That(result.Diagnostics.Select(d => d.Code), Does.Contain(SGWDiagnosticCode.UnknownSector));
+            Assert.That(result.HasErrors, Is.True);
+        });
+    }
+
+    [Test]
+    public void TryParseFile_ErrorInFirstRoom_StillParsesLaterRooms()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: nowhere",
+            "",
+            "The broken room.",
+            "@end",
+            "",
+            "@room 3002 \"Another Street\"",
+            "sector: city",
+            "",
+            "The good room.",
+            "@end"
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms.Select(r => r.Id), Is.EqualTo(new[] { 3002 }));
+            Assert.That(result.Diagnostics.Select(d => d.Code), Does.Contain(SGWDiagnosticCode.UnknownSector));
+        });
+    }
+
+    [Test]
+    public void TryParseFile_UnterminatedLastRoom_ReportsUnterminatedRoomBlock()
+    {
+        var result = _parser.TryParseFile(Sgw(
+            "@room 3001 \"A Street\"",
+            "sector: city",
+            "",
+            "The first room.",
+            "@end",
+            "",
+            "@room 3002 \"Another Street\"",
+            "sector: city",
+            "",
+            "The truncated room."
+        ), "gate.sgw");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Rooms.Select(r => r.Id), Is.EqualTo(new[] { 3001 }));
+            Assert.That(
+                result.Diagnostics.Select(d => d.Code),
+                Does.Contain(SGWDiagnosticCode.UnterminatedRoomBlock)
+            );
+        });
     }
 }

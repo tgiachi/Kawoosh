@@ -1,6 +1,6 @@
 using Kawoosh.SGW.Types;
 
-namespace Kawoosh.SGW.Data;
+namespace Kawoosh.SGW.Data.Diagnostic;
 
 /// <summary>
 /// A single parser diagnostic, rendered as "&lt;file&gt;:&lt;line&gt;: &lt;message&gt;"
@@ -13,6 +13,12 @@ public class SGWDiagnostic
     public SGWDiagnosticCode Code { get; set; }
     public SGWDiagnosticSeverity Severity { get; set; }
     public string Message { get; set; }
+
+    /// <summary>
+    /// Optional secondary location, rendered on the following line indented by two
+    /// spaces (spec 6.3). Used by diagnostics that point at an earlier definition.
+    /// </summary>
+    public SGWDiagnostic? Related { get; set; }
 
     /// <summary>
     /// The spec code as written in the catalogue, for example "E070" or "W001".
@@ -35,7 +41,11 @@ public class SGWDiagnostic
     }
 
     public override string ToString()
-        => Severity == SGWDiagnosticSeverity.Warning
-               ? $"{File}:{Line}: warning: {Message}"
-               : $"{File}:{Line}: {Message}";
+    {
+        var text = Severity == SGWDiagnosticSeverity.Warning
+            ? $"{File}:{Line}: warning: {Message}"
+            : $"{File}:{Line}: {Message}";
+
+        return Related is null ? text : $"{text}{Environment.NewLine}  {Related}";
+    }
 }

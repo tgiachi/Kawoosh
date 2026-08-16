@@ -1,4 +1,6 @@
 using Kawoosh.SGW.Data;
+using Kawoosh.SGW.Data.Diagnostic;
+using Kawoosh.SGW.Data.World;
 using Kawoosh.SGW.Types;
 
 namespace Kawoosh.SGW.Internal;
@@ -9,7 +11,7 @@ namespace Kawoosh.SGW.Internal;
 /// </summary>
 internal class SGWRoomParseContext
 {
-    private readonly string _fileName;
+    public string FileName { get; }
 
     public SGWRoom Room { get; set; } = new();
     public List<SGWDiagnostic> Diagnostics { get; set; } = [];
@@ -30,12 +32,12 @@ internal class SGWRoomParseContext
 
     public SGWRoomParseContext(string fileName)
     {
-        _fileName = fileName;
+        FileName = fileName;
     }
 
     public void Report(SGWDiagnosticCode code, int line, string message)
     {
-        Diagnostics.Add(new SGWDiagnostic(_fileName, line, code, message));
+        Diagnostics.Add(new SGWDiagnostic(FileName, line, code, message));
     }
 
     public void ResetExtra()

@@ -80,4 +80,18 @@ internal static class SGWTokenTables
     {
         return direction.ToString().ToLowerInvariant();
     }
+
+    /// <summary>The reciprocal of a direction, used by the one-way exit report (spec 3).</summary>
+    public static SGWDirection Opposite(SGWDirection direction)
+    {
+        return direction switch
+        {
+            SGWDirection.North => SGWDirection.South,
+            SGWDirection.South => SGWDirection.North,
+            SGWDirection.East  => SGWDirection.West,
+            SGWDirection.West  => SGWDirection.East,
+            SGWDirection.Up    => SGWDirection.Down,
+            _                  => SGWDirection.Up
+        };
+    }
 }

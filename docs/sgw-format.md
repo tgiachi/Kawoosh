@@ -148,11 +148,11 @@ letter          = "A".."Z" | "a".."z" ;
 qualified-name  = identifier , "." , identifier , { "." , identifier } ;
 ```
 
-**`vnum` constraints:** decimal only. Valid range is `1 .. 2147483647`. `0` is reserved
-as the "no room" sentinel and is never a valid vnum in a file. Leading zeros are
-accepted and insignificant (`00042` == `42`). A token that is not a run of decimal
-digits — including a missing token, a sign, or `0x` notation — is `E023`; a well-formed
-decimal number outside the range, including `0`, is `E020`.
+**`vnum` constraints:** decimal only. Valid range is `0 .. 2147483647`, the non-negative
+half of a signed 32-bit integer. `0` is an ordinary vnum; the format reserves no sentinel
+value. Leading zeros are accepted and insignificant (`00042` == `42`). A token that is not
+a run of decimal digits — including a missing token, a sign, or `0x` notation — is `E023`;
+a well-formed decimal number above the range is `E020`.
 
 **`quoted-string` escapes:** exactly four are recognised — `\"` → `"`, `\\` → `\`,
 `\n` → LF, `\t` → TAB. Any other character after a backslash is `E021`. A quoted string
@@ -494,7 +494,7 @@ This section lists the rules only; algorithms are deliberately unspecified.
 20. **(semantic)** Room vnums are unique across the entire loaded world set, not merely
     within one file. A collision reports both the offending location and the location of
     the first definition.
-21. **(syntax)** Every vnum lies in `1 .. 2147483647`.
+21. **(syntax)** Every vnum lies in `0 .. 2147483647`.
 22. **(semantic)** Optional connectivity report: rooms with no inbound exit from any
     other room are unreachable and reported as a warning.
 23. **(semantic)** Optional reciprocity report: an exit `A --dir--> B` with no matching
@@ -572,7 +572,7 @@ message. `{...}` marks interpolated values.
 | `E013` | `unexpected text after room name` |
 | `E014` | `unterminated room block, expected '@end' before end of file` |
 | `E015` | `unknown directive '{directive}'` |
-| `E020` | `room vnum {value} out of range, expected 1..2147483647` |
+| `E020` | `room vnum {value} out of range, expected 0..2147483647` |
 | `E021` | `invalid escape sequence '\{char}' in quoted string` |
 | `E022` | `unterminated quoted string` |
 | `E023` | `expected a room vnum, found '{token}'` |

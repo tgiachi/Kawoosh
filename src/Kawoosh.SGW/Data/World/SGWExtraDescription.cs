@@ -1,4 +1,4 @@
-namespace Kawoosh.SGW.Data;
+namespace Kawoosh.SGW.Data.World;
 
 public class SGWExtraDescription
 {

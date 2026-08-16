@@ -1,6 +1,8 @@
 using System.Text;
 using Serilog;
 using Kawoosh.SGW.Data;
+using Kawoosh.SGW.Data.Diagnostic;
+using Kawoosh.SGW.Data.World;
 using Kawoosh.SGW.Exceptions;
 using Kawoosh.SGW.Interfaces;
 using Kawoosh.SGW.Internal;
@@ -11,34 +13,47 @@ namespace Kawoosh.SGW.Services;
 public class SGWFileParser : ISGWFileParser
 {
     private const string InMemoryFileName = "<memory>";
-    private const int MinVnum = 1;
+    private const string WorldFileSearchPattern = "*.sgw";
+    private const int MinVnum = 0;
     private const int MaxVnum = 2147483647;
 
     private readonly ILogger _logger = Log.ForContext<SGWFileParser>();
 
     public SGWWorld ParseWorld(string filePath)
     {
-        var world = new SGWWorld();
-
-        try
+        if (!File.Exists(filePath))
         {
-            if (!File.Exists(filePath))
-            {
-                _logger.Error("World file not found: {FilePath}", filePath);
+            _logger.Error("World file not found: {FilePath}", filePath);
 
-                throw new FileNotFoundException($"World file not found: {filePath}");
-            }
-
-            using var reader = new StringReader(File.ReadAllText(filePath));
+            throw new FileNotFoundException($"World file not found: {filePath}");
         }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Error parsing world file: {FilePath}", filePath);
 
-            throw;
+        var world = BuildWorld([filePath], out var diagnostics);
+
+        if (diagnostics.Exists(d => d.Severity == SGWDiagnosticSeverity.Error))
+        {
+            throw new SGWParseException(diagnostics, filePath);
         }
 
         return world;
+    }
+
+    public SGWWorld ParseWorldFromDirectory(string directoryPath, out List<SGWDiagnostic> diagnostics)
+    {
+        if (!Directory.Exists(directoryPath))
+        {
+            _logger.Error("World directory not found: {DirectoryPath}", directoryPath);
+
+            throw new DirectoryNotFoundException($"World directory not found: {directoryPath}");
+        }
+
+        // Lexicographic order keeps duplicate-vnum diagnostics reproducible (spec 8.8).
+        var files = Directory
+                    .EnumerateFiles(directoryPath, WorldFileSearchPattern, SearchOption.AllDirectories)
+                    .OrderBy(f => f, StringComparer.Ordinal)
+                    .ToList();
+
+        return BuildWorld(files, out diagnostics);
     }
 
     public SGWRoom ParseRoom(string content)
@@ -46,6 +61,40 @@ public class SGWFileParser : ISGWFileParser
         var result = TryParseRoom(content, InMemoryFileName);
 
         return result.HasErrors ? throw new SGWParseException(result.Diagnostics) : result.Room!;
+    }
+
+    public SGWFileParseResult TryParseFile(string content, string fileName)
+    {
+        var result = new SGWFileParseResult();
+        var lines = NormalizeLines(content);
+        var index = 0;
+
+        while (index < lines.Count)
+        {
+            var context = new SGWRoomParseContext(fileName);
+
+            while (index < lines.Count && !context.Closed)
+            {
+                ParseLine(lines[index], index + 1, context);
+                index++;
+            }
+
+            var block = Finish(context);
+            result.Diagnostics.AddRange(block.Diagnostics);
+
+            if (block.Room is not null)
+            {
+                result.Rooms.Add(block.Room);
+            }
+
+            // No header was opened in the remaining lines: the tail held only comments or blanks.
+            if (context.HeaderLine == 0)
+            {
+                break;
+            }
+        }
+
+        return result;
     }
 
     public SGWRoomParseResult TryParseRoom(string content, string fileName)
@@ -61,7 +110,143 @@ public class SGWFileParser : ISGWFileParser
         return Finish(context);
     }
 
+    // ----------------------------------------------------------- world build
 
+    private SGWWorld BuildWorld(List<string> files, out List<SGWDiagnostic> diagnostics)
+    {
+        var collected = new List<SGWDiagnostic>();
+        var world = new SGWWorld();
+
+        foreach (var file in files)
+        {
+            var result = TryParseFile(File.ReadAllText(file), Path.GetFileName(file));
+            collected.AddRange(result.Diagnostics);
+
+            foreach (var room in result.Rooms)
+            {
+                AddRoomToWorld(world, room, collected);
+            }
+        }
+
+        ValidateWorld(world, collected);
+
+        // Diagnostics are reported ordered by file then line (spec 6.1).
+        diagnostics = [.. collected.OrderBy(d => d.File, StringComparer.Ordinal).ThenBy(d => d.Line)];
+
+        _logger.Debug("Parsed {RoomCount} rooms from {FileCount} file(s)", world.Count, files.Count);
+
+        return world;
+    }
+
+    private static void AddRoomToWorld(SGWWorld world, SGWRoom room, List<SGWDiagnostic> diagnostics)
+    {
+        if (world.AddRoom(room))
+        {
+            return;
+        }
+
+        var existing = world.GetRoom(room.Id)!;
+        var duplicate = new SGWDiagnostic(
+            room.SourceFile,
+            room.SourceLine,
+            SGWDiagnosticCode.DuplicateRoomVnum,
+            $"duplicate room vnum {room.Id}"
+        )
+        {
+            Related = new SGWDiagnostic(
+                existing.SourceFile,
+                existing.SourceLine,
+                SGWDiagnosticCode.DuplicateRoomVnum,
+                "note: first defined here"
+            )
+        };
+
+        diagnostics.Add(duplicate);
+    }
+
+    private static void ValidateWorld(SGWWorld world, List<SGWDiagnostic> diagnostics)
+    {
+        var linked = new HashSet<int>();
+
+        foreach (var room in world.Rooms.Values)
+        {
+            foreach (var exit in room.Exits)
+            {
+                ValidateExit(world, room, exit, linked, diagnostics);
+            }
+        }
+
+        foreach (var room in world.Rooms.Values.Where(room => !linked.Contains(room.Id)))
+        {
+            diagnostics.Add(
+                new SGWDiagnostic(
+                    room.SourceFile,
+                    room.SourceLine,
+                    SGWDiagnosticCode.UnreachableRoom,
+                    $"room {room.Id} is unreachable, no room links to it"
+                )
+            );
+        }
+    }
+
+    private static void ValidateExit(
+        SGWWorld world,
+        SGWRoom room,
+        SGWExit exit,
+        HashSet<int> linked,
+        List<SGWDiagnostic> diagnostics
+    )
+    {
+        var name = SGWTokenTables.DirectionName(exit.Direction);
+
+        if (exit.TargetVnum == room.Id)
+        {
+            diagnostics.Add(
+                new SGWDiagnostic(
+                    room.SourceFile,
+                    exit.SourceLine,
+                    SGWDiagnosticCode.SelfLoopExit,
+                    $"exit '{name}' in room {room.Id} points to itself"
+                )
+            );
+
+            return;
+        }
+
+        var target = world.GetRoom(exit.TargetVnum);
+
+        if (target is null)
+        {
+            diagnostics.Add(
+                new SGWDiagnostic(
+                    room.SourceFile,
+                    exit.SourceLine,
+                    SGWDiagnosticCode.ExitToUnknownRoom,
+                    $"exit '{name}' points to unknown room vnum {exit.TargetVnum}"
+                )
+            );
+
+            return;
+        }
+
+        linked.Add(target.Id);
+
+        var opposite = SGWTokenTables.Opposite(exit.Direction);
+
+        if (target.Exits.Exists(e => e.Direction == opposite && e.TargetVnum == room.Id))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            new SGWDiagnostic(
+                room.SourceFile,
+                exit.SourceLine,
+                SGWDiagnosticCode.OneWayExit,
+                $"exit '{name}' to room {exit.TargetVnum} is one-way"
+            )
+        );
+    }
 
     // ------------------------------------------------------------- line loop
 
@@ -452,6 +637,8 @@ public class SGWFileParser : ISGWFileParser
 
         context.Room.Id = vnum;
         context.Room.Name = name;
+        context.Room.SourceFile = context.FileName;
+        context.Room.SourceLine = lineNumber;
 
         return true;
     }
@@ -477,7 +664,7 @@ public class SGWFileParser : ISGWFileParser
             return;
         }
 
-        var exit = new SGWExit { Direction = direction, TargetVnum = target };
+        var exit = new SGWExit { Direction = direction, TargetVnum = target, SourceLine = lineNumber };
 
         position = SkipWhitespace(trimmed, position);
 
