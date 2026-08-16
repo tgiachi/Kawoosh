@@ -30,4 +30,8 @@
       <ProjectReference Include="..\Kawoosh.SGW\Kawoosh.SGW.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="Kawoosh.Tests"/>
+    </ItemGroup>
+
 </Project>

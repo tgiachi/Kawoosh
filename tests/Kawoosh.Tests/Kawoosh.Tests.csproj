@@ -22,6 +22,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\src\Kawoosh.SGW\Kawoosh.SGW.csproj"/>
+        <ProjectReference Include="..\..\src\Kawoosh.Server\Kawoosh.Server.csproj"/>
     </ItemGroup>
 
 </Project>
