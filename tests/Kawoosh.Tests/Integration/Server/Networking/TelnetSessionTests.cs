@@ -212,6 +212,24 @@ public class TelnetSessionTests
         await start;
     }
 
+    [Test]
+    public async Task StartAsync_SendRacesClientDisconnectTeardown_CompletesWithoutThrowing()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        _connection.Client.Close();
+
+        for (var i = 0; i < 200; i++)
+        {
+            session.Send($"message {i}");
+        }
+
+        await _cancellation.CancelAsync();
+
+        Assert.That(async () => await start, Throws.Nothing);
+    }
+
     private async Task<string> ReadFromClientAsync(int expectedLength = 0)
     {
         var stream = _connection.Client.GetStream();

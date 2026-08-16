@@ -66,7 +66,7 @@ public sealed class TelnetSession : IDisposable
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        var reader = PipeReader.Create(_client.GetStream());
+        var reader = PipeReader.Create(_client.GetStream(), new StreamPipeReaderOptions(leaveOpen: true));
 
         try
         {
@@ -102,6 +102,10 @@ public sealed class TelnetSession : IDisposable
         catch (SocketException exception)
         {
             _logger.Debug(exception, "Session {SessionId} socket failed while reading", Id);
+        }
+        catch (ObjectDisposedException exception)
+        {
+            _logger.Debug(exception, "Session {SessionId} socket was already closed while reading", Id);
         }
         finally
         {
@@ -148,6 +152,10 @@ public sealed class TelnetSession : IDisposable
         catch (SocketException exception)
         {
             _logger.Debug(exception, "Session {SessionId} socket failed while writing", Id);
+        }
+        catch (ObjectDisposedException exception)
+        {
+            _logger.Debug(exception, "Session {SessionId} socket was already closed while writing", Id);
         }
     }
 
