@@ -1,9 +1,9 @@
-﻿namespace Kawoosh.Server;
+﻿using Serilog;
 
-class Program
-{
-    static void Main(string[] args)
+await ConsoleAppFramework.ConsoleApp.RunAsync(
+    args,
+    async () =>
     {
-        Console.WriteLine("Hello, World!");
+        Log.Logger = new LoggerConfiguration().WriteTo.Console().MinimumLevel.Debug().CreateLogger();
     }
-}
+);
