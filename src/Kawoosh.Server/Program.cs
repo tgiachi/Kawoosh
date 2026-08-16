@@ -1,9 +1,9 @@
 using System.Threading.Channels;
 using ConsoleAppFramework;
-using Serilog;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Services;
+using Serilog;
 
 await ConsoleApp.RunAsync(
     args,
@@ -17,8 +17,15 @@ await ConsoleApp.RunAsync(
         using var listener = new TelnetListener(port);
         var sink = new CommandLogService();
 
-        var accepting = listener.StartAsync(commands.Writer, cancellationToken);
-        var pumping = sink.PumpAsync(commands.Reader, cancellationToken);
+        // Either half ending means the server no longer serves anyone: an accept loop that
+        // stopped on its own would otherwise leave the process up and silently dead.
+        using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var accepting = listener.StartAsync(commands.Writer, shutdown.Token);
+        var pumping = sink.PumpAsync(commands.Reader, shutdown.Token);
+
+        await Task.WhenAny(accepting, pumping);
+        await shutdown.CancelAsync();
 
         await Task.WhenAll(accepting, pumping);
 

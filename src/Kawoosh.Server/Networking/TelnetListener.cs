@@ -2,13 +2,13 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using Serilog;
 using Kawoosh.Server.Data.Network;
+using Serilog;
 
 namespace Kawoosh.Server.Networking;
 
 /// <summary>
-/// Accepts telnet clients and gives each one a <see cref="TelnetSession"/>. Session tasks are
+/// Accepts telnet clients and gives each one a <see cref="TelnetSession" />. Session tasks are
 /// tracked so shutdown can await them, but the accept loop never waits on a session.
 /// </summary>
 public sealed class TelnetListener : IDisposable
@@ -27,13 +27,16 @@ public sealed class TelnetListener : IDisposable
 
     public TelnetListener(int port = DefaultPort)
     {
-        _listener = new TcpListener(IPAddress.Any, port);
+        _listener = new(IPAddress.Any, port);
 
         // Bind here rather than in StartAsync: a caller that starts the accept loop as a
         // task must be able to read the assigned port immediately.
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
     }
+
+    public void Dispose()
+        => _listener.Dispose();
 
     public async Task StartAsync(ChannelWriter<Command> commands, CancellationToken cancellationToken)
     {
@@ -58,7 +61,7 @@ public sealed class TelnetListener : IDisposable
         finally
         {
             _listener.Stop();
-            await Task.WhenAll(_sessions.Values.ToArray());
+            await DrainSessionsAsync();
 
             _logger.Information("Telnet listener on port {Port} stopped", Port);
         }
@@ -75,17 +78,36 @@ public sealed class TelnetListener : IDisposable
         _sessions[session.Id] = task;
 
         task.ContinueWith(
-            _ =>
+            completed =>
             {
                 _sessions.TryRemove(session.Id, out _);
                 session.Dispose();
+
+                // Reading Exception also observes it: an unobserved session fault would
+                // otherwise be swallowed by the runtime with no trace at any level.
+                if (completed.Exception is not null)
+                {
+                    _logger.Error(completed.Exception, "Session {SessionId} ended with a fault", session.Id);
+                }
             },
             TaskScheduler.Default
         );
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Waits for every tracked session, absorbing faults. This runs in the accept loop's
+    /// finally block, where an escaping exception would replace whatever brought the loop
+    /// down and skip the shutdown logging that explains it.
+    /// </summary>
+    private async Task DrainSessionsAsync()
     {
-        _listener.Dispose();
+        try
+        {
+            await Task.WhenAll(_sessions.Values.ToArray());
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "Telnet listener on port {Port} had a session fail during shutdown", Port);
+        }
     }
 }

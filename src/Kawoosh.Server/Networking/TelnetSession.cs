@@ -2,10 +2,10 @@ using System.IO.Pipelines;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
-using Serilog;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Data.World;
 using Kawoosh.Server.Networking.Internal;
+using Serilog;
 
 namespace Kawoosh.Server.Networking;
 
@@ -15,7 +15,16 @@ namespace Kawoosh.Server.Networking;
 /// </summary>
 public sealed class TelnetSession : IDisposable
 {
-    private const int OutboundCapacity = 64;
+    /// <summary>
+    /// The longest line accepted from a client, in bytes. Without a cap the inbound pipe keeps
+    /// chaining segments for a client that never sends a line feed, so one connection can
+    /// exhaust the process memory. Generous for a MUD: no player types eight kilobytes.
+    /// </summary>
+    internal const int MaxLineLength = 8 * 1024;
+
+    /// <summary>How many messages may be queued for one client before writes start dropping.</summary>
+    internal const int OutboundCapacity = 64;
+
     private const string LineTerminator = "\r\n";
 
     private readonly ILogger _logger = Log.ForContext<TelnetSession>();
@@ -41,23 +50,10 @@ public sealed class TelnetSession : IDisposable
         );
     }
 
-    /// <summary>Runs the inbound and outbound loops until both finish or cancellation arrives.</summary>
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public void Dispose()
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        var inbound = RunAsync(linked.Token);
-        var outbound = WriterLoopAsync(linked.Token);
-
-        try
-        {
-            await Task.WhenAll(inbound, outbound);
-        }
-        finally
-        {
-            await linked.CancelAsync();
-            _logger.Debug("Session {SessionId} closed", Id);
-        }
+        _outbound.Writer.TryComplete();
+        _client.Dispose();
     }
 
     /// <summary>
@@ -66,10 +62,14 @@ public sealed class TelnetSession : IDisposable
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        var reader = PipeReader.Create(_client.GetStream(), new StreamPipeReaderOptions(leaveOpen: true));
+        PipeReader? reader = null;
 
         try
         {
+            // GetStream throws once the client has been disposed, so it belongs inside the
+            // guarded region rather than ahead of it.
+            reader = PipeReader.Create(_client.GetStream(), new(leaveOpen: true));
+
             while (!cancellationToken.IsCancellationRequested)
             {
                 var result = await reader.ReadAsync(cancellationToken);
@@ -78,12 +78,28 @@ public sealed class TelnetSession : IDisposable
                 while (TelnetLineReader.TryReadLine(ref buffer, out var line))
                 {
                     var text = TelnetLineReader.Decode(line);
-                    await _commands.WriteAsync(new Command(this, text), cancellationToken);
+                    await _commands.WriteAsync(new(this, text), cancellationToken);
                 }
+
+                // Read before advancing: the sequence must not be touched afterwards.
+                var pending = buffer.Length;
 
                 // Consumed stops at the last complete line; examined covers everything we
                 // looked at, so a partial line is kept and we still wait for more bytes.
                 reader.AdvanceTo(buffer.Start, buffer.End);
+
+                if (pending > MaxLineLength)
+                {
+                    // A client this far past the cap with no line feed is broken or hostile,
+                    // and discarding silently would leave it typing into a void.
+                    _logger.Warning(
+                        "Session {SessionId} sent {Pending} bytes with no line terminator, closing it",
+                        Id,
+                        pending
+                    );
+
+                    break;
+                }
 
                 if (result.IsCompleted)
                 {
@@ -109,7 +125,11 @@ public sealed class TelnetSession : IDisposable
         }
         finally
         {
-            await reader.CompleteAsync();
+            if (reader is not null)
+            {
+                await reader.CompleteAsync();
+            }
+
             _outbound.Writer.TryComplete();
         }
     }
@@ -127,12 +147,38 @@ public sealed class TelnetSession : IDisposable
         }
     }
 
-    private async Task WriterLoopAsync(CancellationToken cancellationToken)
+    /// <summary>Runs the inbound and outbound loops until both finish or cancellation arrives.</summary>
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var stream = _client.GetStream();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        var inbound = RunAsync(linked.Token);
+        var outbound = WriterLoopAsync(linked.Token);
 
         try
         {
+            // Whichever loop finishes first tears the other one down. Cancelling here, rather
+            // than after both have ended, is what makes it a safety net: it can still unblock
+            // a loop parked on a live socket.
+            await Task.WhenAny(inbound, outbound);
+            await linked.CancelAsync();
+
+            await Task.WhenAll(inbound, outbound);
+        }
+        finally
+        {
+            _logger.Debug("Session {SessionId} closed", Id);
+        }
+    }
+
+    private async Task WriterLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            // GetStream throws once the client has been disposed, so it belongs inside the
+            // guarded region rather than ahead of it.
+            var stream = _client.GetStream();
+
             await foreach (var message in _outbound.Reader.ReadAllAsync(cancellationToken))
             {
                 var payload = Encoding.UTF8.GetBytes(message + LineTerminator);
@@ -157,11 +203,5 @@ public sealed class TelnetSession : IDisposable
         {
             _logger.Debug(exception, "Session {SessionId} socket was already closed while writing", Id);
         }
-    }
-
-    public void Dispose()
-    {
-        _outbound.Writer.TryComplete();
-        _client.Dispose();
     }
 }
