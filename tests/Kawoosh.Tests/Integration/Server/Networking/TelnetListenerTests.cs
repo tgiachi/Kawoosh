@@ -29,6 +29,42 @@ public class TelnetListenerTests
         Assert.That(listener.Port, Is.GreaterThan(0));
     }
 
+    [Test]
+    public void Port_BeforeStart_IsZero()
+    {
+        using var listener = new TelnetListener();
+
+        Assert.That(listener.Port, Is.Zero);
+    }
+
+    [Test]
+    public void Dispose_OnAListenerThatWasNeverStarted_DoesNotThrow()
+    {
+        var listener = new TelnetListener();
+
+        Assert.That(listener.Dispose, Throws.Nothing);
+    }
+
+    [Test]
+    public void StartAsync_BeforeStart_ThrowsAnExplicitError()
+    {
+        using var listener = new TelnetListener();
+
+        Assert.That(
+            async () => await listener.StartAsync(_commands.Writer, _cancellation.Token),
+            Throws.InstanceOf<InvalidOperationException>()
+                  .With.Message.Contains("Start")
+        );
+    }
+
+    [Test]
+    public void Start_CalledTwice_ThrowsInsteadOfLeakingTheFirstSocket()
+    {
+        using var listener = CreateListener();
+
+        Assert.That(() => listener.Start(EphemeralPort), Throws.InstanceOf<InvalidOperationException>());
+    }
+
     [SetUp]
     public void SetUp()
     {

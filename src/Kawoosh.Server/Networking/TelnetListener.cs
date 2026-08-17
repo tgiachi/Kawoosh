@@ -2,8 +2,8 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using Kawoosh.Server.Data.Network;
 using Serilog;
+using Kawoosh.Server.Data.Network;
 
 namespace Kawoosh.Server.Networking;
 
@@ -16,38 +16,53 @@ public sealed class TelnetListener : IDisposable
     public const int DefaultPort = 4000;
 
     private readonly ILogger _logger = Log.ForContext<TelnetListener>();
-    private TcpListener _listener;
     private readonly ConcurrentDictionary<Guid, Task> _sessions = new();
 
+    // Null until Start binds it: the type is resolved from the service provider, which needs a
+    // parameterless constructor, so construction and binding cannot be the same step.
+    private TcpListener? _listener;
+
     /// <summary>
-    /// The bound port. Equals the requested port, or the ephemeral port the OS assigned when
-    /// 0 was requested. Bound in the constructor, so callers never race the accept loop.
+    /// The bound port: the requested port, or the ephemeral port the OS assigned when 0 was
+    /// requested. Zero until <see cref="Start" /> has run. Bound there rather than in
+    /// <see cref="StartAsync" /> so a caller that launches the accept loop as an un-awaited
+    /// task can still read the port immediately.
     /// </summary>
-    public int Port { get; set; }
+    public int Port { get; private set; }
 
-
+    /// <summary>Binds the socket. Must run before <see cref="StartAsync" />.</summary>
+    /// <exception cref="InvalidOperationException">The listener is already bound.</exception>
     public void Start(int port = DefaultPort)
     {
-        _listener = new(IPAddress.Any, port);
+        if (_listener is not null)
+        {
+            throw new InvalidOperationException($"Telnet listener is already started on port {Port}.");
+        }
 
-        // Bind here rather than in StartAsync: a caller that starts the accept loop as a
-        // task must be able to read the assigned port immediately.
-        _listener.Start();
-        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+        var listener = new TcpListener(IPAddress.Any, port);
+        listener.Start();
+
+        _listener = listener;
+        Port = ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    public void Dispose()
-        => _listener.Dispose();
-
+    /// <exception cref="InvalidOperationException"><see cref="Start" /> has not run.</exception>
     public async Task StartAsync(ChannelWriter<Command> commands, CancellationToken cancellationToken)
     {
+        // Fail here rather than on a null dereference deeper in: the caller's mistake is
+        // having skipped Start, and the message should say so.
+        var listener = _listener ??
+                       throw new InvalidOperationException(
+                           "Telnet listener must be started with Start before StartAsync is called."
+                       );
+
         _logger.Information("Telnet listener accepting connections on port {Port}", Port);
 
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var client = await _listener.AcceptTcpClientAsync(cancellationToken);
+                var client = await listener.AcceptTcpClientAsync(cancellationToken);
                 Accept(client, commands, cancellationToken);
             }
         }
@@ -61,7 +76,7 @@ public sealed class TelnetListener : IDisposable
         }
         finally
         {
-            _listener.Stop();
+            listener.Stop();
             await DrainSessionsAsync();
 
             _logger.Information("Telnet listener on port {Port} stopped", Port);
@@ -110,5 +125,10 @@ public sealed class TelnetListener : IDisposable
         {
             _logger.Error(exception, "Telnet listener on port {Port} had a session fail during shutdown", Port);
         }
+    }
+
+    public void Dispose()
+    {
+        _listener?.Dispose();
     }
 }
