@@ -268,22 +268,120 @@ public class GameLoopServiceTests
     }
 
     [Test]
-    public void Enqueue_WhileTheLoopIsRunning_IsAccepted()
+    public void Enqueue_WhileTheLoopIsRunning_ReturnsAHandle()
     {
         _ = _gameLoop.ProcessAsync(_cancellation.Token);
 
-        Assert.That(_gameLoop.Enqueue(new PlayerInputCommand(_session, "look")), Is.True);
+        Assert.That(_gameLoop.Enqueue(new PlayerInputCommand(_session, "look")), Is.Not.Zero);
     }
 
     [Test]
-    public async Task Enqueue_AfterTheLoopStopped_IsRejected()
+    public async Task Enqueue_AfterTheLoopStopped_ReturnsNotScheduled()
     {
         var processing = _gameLoop.ProcessAsync(_cancellation.Token);
 
         await _cancellation.CancelAsync();
         await processing;
 
-        Assert.That(_gameLoop.Enqueue(new PlayerInputCommand(_session, "look")), Is.False);
+        Assert.That(
+            _gameLoop.Enqueue(new PlayerInputCommand(_session, "look")),
+            Is.EqualTo(GameLoopService.NotScheduled)
+        );
+    }
+
+    [Test]
+    public async Task Cancel_BeforeTheCommandIsDue_StopsItFromRunning()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        var handle = _gameLoop.Enqueue(new PlayerInputCommand(_session, "cancelled"), 150);
+        _gameLoop.Enqueue(new PlayerInputCommand(_session, "sentinel"), 400);
+
+        var cancelled = _gameLoop.Cancel(handle);
+
+        // The sentinel is due long after the cancelled command was. If cancellation had not
+        // taken, "echo: cancelled" would sit ahead of it and this exact match would fail.
+        const string expected = "echo: sentinel\r\n";
+        var received = await ReadFromClientAsync(expected);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(cancelled, Is.True);
+            Assert.That(received, Is.EqualTo(expected));
+        });
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task Cancel_OneOfSeveral_LeavesTheOthersAlone()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        _gameLoop.Enqueue(new PlayerInputCommand(_session, "first"), 60);
+        var handle = _gameLoop.Enqueue(new PlayerInputCommand(_session, "second"), 120);
+        _gameLoop.Enqueue(new PlayerInputCommand(_session, "third"), 180);
+
+        _gameLoop.Cancel(handle);
+
+        const string expected = "echo: first\r\necho: third\r\n";
+        var received = await ReadFromClientAsync(expected);
+
+        Assert.That(received, Is.EqualTo(expected));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public void Cancel_APendingCommand_ReportsThatItCancelledSomething()
+    {
+        _ = _gameLoop.ProcessAsync(_cancellation.Token);
+        var handle = _gameLoop.Enqueue(new PlayerInputCommand(_session, "later"), 5000);
+
+        Assert.That(_gameLoop.Cancel(handle), Is.True);
+    }
+
+    [Test]
+    public void Cancel_AnUnknownHandle_ReportsThatNothingWasCancelled()
+    {
+        _ = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_gameLoop.Cancel(999_999), Is.False);
+            Assert.That(_gameLoop.Cancel(GameLoopService.NotScheduled), Is.False);
+        });
+    }
+
+    [Test]
+    public void Cancel_TheSameHandleTwice_ReportsNothingTheSecondTime()
+    {
+        _ = _gameLoop.ProcessAsync(_cancellation.Token);
+        var handle = _gameLoop.Enqueue(new PlayerInputCommand(_session, "later"), 5000);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(_gameLoop.Cancel(handle), Is.True);
+            Assert.That(_gameLoop.Cancel(handle), Is.False);
+        });
+    }
+
+    [Test]
+    public async Task Cancel_AfterTheCommandAlreadyRan_ReportsNothingCancelled()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        var handle = _gameLoop.Enqueue(new PlayerInputCommand(_session, "done"));
+        await ReadFromClientAsync("echo: done\r\n");
+
+        // A handle whose command has run is forgotten, so cancelling it is a no-op rather
+        // than an entry that accumulates for the lifetime of the process.
+        Assert.That(_gameLoop.Cancel(handle), Is.False);
+
+        await _cancellation.CancelAsync();
+        await processing;
     }
 
     [Test]
