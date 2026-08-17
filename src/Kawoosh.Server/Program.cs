@@ -27,19 +27,22 @@ await ConsoleApp.RunAsync(
 
         using var listener = serviceProvider.GetService<TelnetListener>();
         listener.Start(port);
-        var sink = new CommandLogService();
 
-        // Either half ending means the server no longer serves anyone: an accept loop that
+        using var gameLoop = new GameLoopService();
+        var router = new SessionInputRouter(gameLoop);
+
+        // Any of the three ending means the server no longer serves anyone: a half that
         // stopped on its own would otherwise leave the process up and silently dead.
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         var accepting = listener.StartAsync(commands.Writer, shutdown.Token);
-        var pumping = sink.PumpAsync(commands.Reader, shutdown.Token);
+        var routing = router.PumpAsync(commands.Reader, shutdown.Token);
+        var ticking = gameLoop.ProcessAsync(shutdown.Token);
 
-        await Task.WhenAny(accepting, pumping);
+        await Task.WhenAny(accepting, routing, ticking);
         await shutdown.CancelAsync();
 
-        await Task.WhenAll(accepting, pumping);
+        await Task.WhenAll(accepting, routing, ticking);
 
         Log.Information("Kawoosh Server stopped");
         await Log.CloseAndFlushAsync();
