@@ -115,8 +115,6 @@ public class SGWFileParserTests
         Assert.That(room.Description, Is.EqualTo("First line.\nSecond line."));
     }
 
-    // -------------------------------------------------------------- comments
-
     [Test]
     public void ParseRoom_CommentLine_IsIgnored()
     {
@@ -138,8 +136,6 @@ public class SGWFileParserTests
             }
         );
     }
-
-    // -------------------------------------------- block boundary and encoding
 
     [Test]
     public void ParseRoom_ContentAfterEndDirective_IsIgnored()
@@ -245,8 +241,6 @@ public class SGWFileParserTests
         Assert.That(room.Description, Is.EqualTo("A plain stone altar stands here."));
     }
 
-    // ----------------------------------------------------------- description
-
     [Test]
     public void ParseRoom_Description_JoinsLinesWithLineFeed()
     {
@@ -334,8 +328,6 @@ public class SGWFileParserTests
 
         Assert.That(room.Description, Is.EqualTo("@end is written on the wall.\nStill inside the description."));
     }
-
-    // ------------------------------------------------------ line-start escape
 
     [Test]
     public void ParseRoom_EscapedHashAtLineStart_YieldsLiteralHash()
@@ -542,8 +534,6 @@ public class SGWFileParserTests
         Assert.That(room.Extras[0].Text, Is.EqualTo("top\n    indented further"));
     }
 
-    // ---------------------------------------------------------------- extras
-
     [Test]
     public void ParseRoom_ExtraWithInlineText_IsParsed()
     {
@@ -657,8 +647,6 @@ public class SGWFileParserTests
 
         Assert.That(room.Flags, Is.Empty);
     }
-
-    // ----------------------------------------------------------------- flags
 
     [Test]
     public void ParseRoom_FlagsSpaceSeparated_ParsesEveryFlag()
@@ -833,8 +821,6 @@ public class SGWFileParserTests
         );
     }
 
-    // ---------------------------------------------------------------- header
-
     [Test]
     public void ParseRoom_RoomHeader_ParsesVnumAndName()
     {
@@ -884,8 +870,6 @@ public class SGWFileParserTests
         Assert.That(room.Scripts, Does.ContainKey("enter"));
     }
 
-    // --------------------------------------------------------------- scripts
-
     [Test]
     public void ParseRoom_ScriptLine_IsStoredUnderItsEvent()
     {
@@ -930,8 +914,6 @@ public class SGWFileParserTests
         Assert.That(room.Sector, Is.EqualTo("forest"));
     }
 
-    // ---------------------------------------------------------------- sector
-
     [Test]
     public void ParseRoom_SectorAttribute_IsStored()
     {
@@ -973,8 +955,6 @@ public class SGWFileParserTests
 
         Assert.That(room.Sector, Is.EqualTo("city"));
     }
-
-    // ----------------------------------------------------------------- exits
 
     [Test]
     public void ParseRoom_SimpleExit_IsParsed()
@@ -1251,8 +1231,6 @@ public class SGWFileParserTests
             }
         );
     }
-
-    // ------------------------------------------------------- whole-file parse
 
     [Test]
     public void TryParseFile_SingleRoom_ReturnsThatRoom()
@@ -1839,8 +1817,6 @@ public class SGWFileParserTests
             }
         );
     }
-
-    // ----------------------------------------------------------- diagnostics
 
     private static IEnumerable<SGWDiagnosticCode> CodesOf(SGWRoomParseResult result)
         => result.Diagnostics.Select(d => d.Code);

@@ -22,9 +22,9 @@ public class TelnetListenerTests
         => Assert.That(TelnetListener.DefaultPort, Is.EqualTo(4000));
 
     [Test]
-    public void Port_WhenZeroWasRequested_IsTheEphemeralPortBoundByTheConstructor()
+    public void Port_WhenZeroWasRequested_IsTheEphemeralPortBoundByStart()
     {
-        using var listener = new TelnetListener(EphemeralPort);
+        using var listener = CreateListener();
 
         Assert.That(listener.Port, Is.GreaterThan(0));
     }
@@ -39,7 +39,7 @@ public class TelnetListenerTests
     [Test]
     public async Task StartAsync_Cancelled_StopsWithoutThrowing()
     {
-        using var listener = new TelnetListener(EphemeralPort);
+        using var listener = CreateListener();
         var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
 
         using var client = await ConnectAsync(listener);
@@ -51,7 +51,7 @@ public class TelnetListenerTests
     [Test]
     public async Task StartAsync_ClientConnectsAndSendsALine_PublishesTheCommand()
     {
-        using var listener = new TelnetListener(EphemeralPort);
+        using var listener = CreateListener();
         var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
 
         using var client = await ConnectAsync(listener);
@@ -68,7 +68,7 @@ public class TelnetListenerTests
     [Test]
     public async Task StartAsync_OneClientKeepsTalking_DoesNotBlockTheAcceptLoop()
     {
-        using var listener = new TelnetListener(EphemeralPort);
+        using var listener = CreateListener();
         var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
 
         using var talkative = await ConnectAsync(listener);
@@ -89,7 +89,7 @@ public class TelnetListenerTests
     [Test]
     public async Task StartAsync_TwoClients_BothAreServed()
     {
-        using var listener = new TelnetListener(EphemeralPort);
+        using var listener = CreateListener();
         var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
 
         using var first = await ConnectAsync(listener);
@@ -116,6 +116,19 @@ public class TelnetListenerTests
     [TearDown]
     public void TearDown()
         => _cancellation.Dispose();
+
+    /// <summary>
+    /// Builds a listener bound to an ephemeral port. The constructor no longer binds, so
+    /// <see cref="TelnetListener.Start" /> has to run before <see cref="TelnetListener.Port" />
+    /// is meaningful.
+    /// </summary>
+    private static TelnetListener CreateListener()
+    {
+        var listener = new TelnetListener();
+        listener.Start(EphemeralPort);
+
+        return listener;
+    }
 
     private async Task<TcpClient> ConnectAsync(TelnetListener listener)
     {

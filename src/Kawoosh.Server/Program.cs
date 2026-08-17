@@ -2,19 +2,31 @@ using System.Threading.Channels;
 using ConsoleAppFramework;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Networking;
+using Kawoosh.Server.Provider;
 using Kawoosh.Server.Services;
 using Serilog;
+using Serilog.Sinks.SystemConsole.Themes;
 
 await ConsoleApp.RunAsync(
     args,
     async (CancellationToken cancellationToken, int port = TelnetListener.DefaultPort) =>
     {
-        Log.Logger = new LoggerConfiguration().WriteTo.Console().MinimumLevel.Debug().CreateLogger();
+        Log.Logger = new LoggerConfiguration().WriteTo
+                                              .Console(
+                                                  theme: AnsiConsoleTheme.Literate,
+                                                  applyThemeToRedirectedOutput: true
+                                              )
+                                              .MinimumLevel
+                                              .Debug()
+                                              .CreateLogger();
         Log.Information("Starting Kawoosh Server...");
+
+        var serviceProvider = new KawooshServiceProvider();
 
         var commands = Channel.CreateUnbounded<Command>();
 
-        using var listener = new TelnetListener(port);
+        using var listener = serviceProvider.GetService<TelnetListener>();
+        listener.Start(port);
         var sink = new CommandLogService();
 
         // Either half ending means the server no longer serves anyone: an accept loop that

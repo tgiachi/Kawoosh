@@ -81,8 +81,6 @@ public class SGWFileParserTests
         );
     }
 
-    // -------------------------------------------------------- duplicate vnum
-
     [Test]
     public void ParseWorldFromDirectory_DuplicateVnum_ReportsDuplicateRoomVnum()
     {
@@ -110,8 +108,6 @@ public class SGWFileParserTests
             }
         );
     }
-
-    // ---------------------------------------------------- exit cross-checking
 
     [Test]
     public void ParseWorldFromDirectory_ExitToUnknownRoom_ReportsExitToUnknownRoom()
@@ -199,8 +195,6 @@ public class SGWFileParserTests
         );
     }
 
-    // ------------------------------------------------------ error collection
-
     [Test]
     public void ParseWorldFromDirectory_InvalidRoom_DoesNotThrowAndKeepsTheValidOnes()
     {
@@ -218,8 +212,6 @@ public class SGWFileParserTests
             }
         );
     }
-
-    // ------------------------------------------------------------- discovery
 
     [Test]
     public void ParseWorldFromDirectory_LoadsRoomsFromEverySgwFile()
@@ -406,8 +398,6 @@ public class SGWFileParserTests
 
         Assert.Throws<FileNotFoundException>(() => _parser.ParseWorld(missing));
     }
-
-    // ------------------------------------------------------- single-file load
 
     [Test]
     public void ParseWorld_ValidFile_ReturnsWorldWithItsRooms()

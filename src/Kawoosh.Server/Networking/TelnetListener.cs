@@ -16,16 +16,17 @@ public sealed class TelnetListener : IDisposable
     public const int DefaultPort = 4000;
 
     private readonly ILogger _logger = Log.ForContext<TelnetListener>();
-    private readonly TcpListener _listener;
+    private TcpListener _listener;
     private readonly ConcurrentDictionary<Guid, Task> _sessions = new();
 
     /// <summary>
     /// The bound port. Equals the requested port, or the ephemeral port the OS assigned when
     /// 0 was requested. Bound in the constructor, so callers never race the accept loop.
     /// </summary>
-    public int Port { get; }
+    public int Port { get; set; }
 
-    public TelnetListener(int port = DefaultPort)
+
+    public void Start(int port = DefaultPort)
     {
         _listener = new(IPAddress.Any, port);
 
