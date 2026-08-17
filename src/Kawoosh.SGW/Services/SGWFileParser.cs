@@ -1,12 +1,11 @@
 using System.Text;
-using Serilog;
-using Kawoosh.SGW.Data;
 using Kawoosh.SGW.Data.Diagnostic;
 using Kawoosh.SGW.Data.World;
 using Kawoosh.SGW.Exceptions;
 using Kawoosh.SGW.Interfaces;
 using Kawoosh.SGW.Internal;
 using Kawoosh.SGW.Types;
+using Serilog;
 
 namespace Kawoosh.SGW.Services;
 
@@ -18,6 +17,13 @@ public class SGWFileParser : ISGWFileParser
     private const int MaxVnum = 2147483647;
 
     private readonly ILogger _logger = Log.ForContext<SGWFileParser>();
+
+    public SGWRoom ParseRoom(string content)
+    {
+        var result = TryParseRoom(content, InMemoryFileName);
+
+        return result.HasErrors ? throw new SGWParseException(result.Diagnostics) : result.Room!;
+    }
 
     public SGWWorld ParseWorld(string filePath)
     {
@@ -54,13 +60,6 @@ public class SGWFileParser : ISGWFileParser
                     .ToList();
 
         return BuildWorld(files, out diagnostics);
-    }
-
-    public SGWRoom ParseRoom(string content)
-    {
-        var result = TryParseRoom(content, InMemoryFileName);
-
-        return result.HasErrors ? throw new SGWParseException(result.Diagnostics) : result.Room!;
     }
 
     public SGWFileParseResult TryParseFile(string content, string fileName)
@@ -110,6 +109,64 @@ public class SGWFileParser : ISGWFileParser
         return Finish(context);
     }
 
+    private static void AddRoomToWorld(SGWWorld world, SGWRoom room, List<SGWDiagnostic> diagnostics)
+    {
+        if (world.AddRoom(room))
+        {
+            return;
+        }
+
+        var existing = world.GetRoom(room.Id)!;
+        var duplicate = new SGWDiagnostic(
+            room.SourceFile,
+            room.SourceLine,
+            SGWDiagnosticCode.DuplicateRoomVnum,
+            $"duplicate room vnum {room.Id}"
+        )
+        {
+            Related = new(
+                existing.SourceFile,
+                existing.SourceLine,
+                SGWDiagnosticCode.DuplicateRoomVnum,
+                "note: first defined here"
+            )
+        };
+
+        diagnostics.Add(duplicate);
+    }
+
+    // --------------------------------------------------------- text assembly
+
+    private static string AssembleDescription(List<string> lines)
+        => JoinTrimmedBlock(lines.Select(l => l.TrimEnd()).ToList());
+
+    private static string AssembleExtraText(string inlineText, List<string> continuations)
+    {
+        var lines = new List<string>();
+        var inline = inlineText.Trim();
+
+        if (inline.Length > 0)
+        {
+            lines.Add(inline);
+        }
+
+        var prefix = LongestCommonWhitespacePrefix(continuations);
+
+        foreach (var continuation in continuations)
+        {
+            if (continuation.Trim().Length == 0)
+            {
+                lines.Add(string.Empty);
+
+                continue;
+            }
+
+            lines.Add(continuation[prefix..].TrimEnd());
+        }
+
+        return JoinTrimmedBlock(lines);
+    }
+
     // ----------------------------------------------------------- world build
 
     private SGWWorld BuildWorld(List<string> files, out List<SGWDiagnostic> diagnostics)
@@ -138,114 +195,416 @@ public class SGWFileParser : ISGWFileParser
         return world;
     }
 
-    private static void AddRoomToWorld(SGWWorld world, SGWRoom room, List<SGWDiagnostic> diagnostics)
+    private static SGWRoomParseResult Finish(SGWRoomParseContext context)
     {
-        if (world.AddRoom(room))
+        var result = new SGWRoomParseResult { Diagnostics = context.Diagnostics };
+
+        FlushExtra(context);
+
+        if (context.HeaderLine == 0)
         {
-            return;
+            return result;
         }
 
-        var existing = world.GetRoom(room.Id)!;
-        var duplicate = new SGWDiagnostic(
-            room.SourceFile,
-            room.SourceLine,
-            SGWDiagnosticCode.DuplicateRoomVnum,
-            $"duplicate room vnum {room.Id}"
-        )
+        if (!context.Closed)
         {
-            Related = new SGWDiagnostic(
-                existing.SourceFile,
-                existing.SourceLine,
-                SGWDiagnosticCode.DuplicateRoomVnum,
-                "note: first defined here"
-            )
-        };
+            context.Report(
+                SGWDiagnosticCode.UnterminatedRoomBlock,
+                context.HeaderLine,
+                "unterminated room block, expected '@end' before end of file"
+            );
+        }
 
-        diagnostics.Add(duplicate);
+        context.Room.Description = AssembleDescription(context.DescriptionLines);
+
+        if (!context.SawSector)
+        {
+            context.Report(
+                SGWDiagnosticCode.MissingSector,
+                context.HeaderLine,
+                $"room {context.Room.Id} is missing the required 'sector' attribute"
+            );
+        }
+
+        if (context.Room.Description.Length == 0)
+        {
+            context.Report(
+                SGWDiagnosticCode.MissingDescription,
+                context.HeaderLine,
+                $"room {context.Room.Id} has no description"
+            );
+        }
+
+        // A room that produced any error is excluded from the world (spec 5.5 rule 27).
+        result.Room = result.HasErrors ? null : context.Room;
+
+        return result;
     }
 
-    private static void ValidateWorld(SGWWorld world, List<SGWDiagnostic> diagnostics)
+    private static int FirstNonWhitespaceIndex(string line)
     {
-        var linked = new HashSet<int>();
-
-        foreach (var room in world.Rooms.Values)
+        for (var i = 0; i < line.Length; i++)
         {
-            foreach (var exit in room.Exits)
+            if (!char.IsWhiteSpace(line[i]))
             {
-                ValidateExit(world, room, exit, linked, diagnostics);
+                return i;
             }
         }
 
-        foreach (var room in world.Rooms.Values.Where(room => !linked.Contains(room.Id)))
-        {
-            diagnostics.Add(
-                new SGWDiagnostic(
-                    room.SourceFile,
-                    room.SourceLine,
-                    SGWDiagnosticCode.UnreachableRoom,
-                    $"room {room.Id} is unreachable, no room links to it"
-                )
-            );
-        }
+        return -1;
     }
 
-    private static void ValidateExit(
-        SGWWorld world,
-        SGWRoom room,
-        SGWExit exit,
-        HashSet<int> linked,
-        List<SGWDiagnostic> diagnostics
-    )
+    private static string FirstToken(string trimmed)
     {
-        var name = SGWTokenTables.DirectionName(exit.Direction);
+        var position = 0;
 
-        if (exit.TargetVnum == room.Id)
+        return ReadToken(trimmed, ref position);
+    }
+
+    private static void FlushExtra(SGWRoomParseContext context)
+    {
+        if (context.ExtraKeywords is null)
         {
-            diagnostics.Add(
-                new SGWDiagnostic(
-                    room.SourceFile,
-                    exit.SourceLine,
-                    SGWDiagnosticCode.SelfLoopExit,
-                    $"exit '{name}' in room {room.Id} points to itself"
-                )
+            return;
+        }
+
+        var text = AssembleExtraText(context.ExtraInline, context.ExtraContinuations);
+
+        if (text.Length == 0)
+        {
+            var label = context.ExtraKeywords.Count > 0 ? context.ExtraKeywords[0] : string.Empty;
+            context.Report(
+                SGWDiagnosticCode.EmptyExtraText,
+                context.ExtraLine,
+                $"extra description '{label}' has no text"
+            );
+        }
+        else
+        {
+            context.Room.Extras.Add(new() { Keywords = context.ExtraKeywords, Text = text });
+        }
+
+        context.ResetExtra();
+    }
+
+    // ----------------------------------------------------------------- extras
+
+    private static bool IsExtraOpener(string trimmed)
+    {
+        if (!trimmed.StartsWith("extra", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var position = "extra".Length;
+
+        if (position >= trimmed.Length || !char.IsWhiteSpace(trimmed[position]))
+        {
+            return false;
+        }
+
+        position = SkipWhitespace(trimmed, position);
+
+        // The grammar requires a quoted keyword list; without it the line is prose.
+        return position < trimmed.Length && trimmed[position] == '"';
+    }
+
+    private static bool IsIdentifier(string segment)
+    {
+        if (segment.Length == 0 || !char.IsAsciiLetter(segment[0]) && segment[0] != '_')
+        {
+            return false;
+        }
+
+        return segment.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+    }
+
+    private static bool IsQualifiedName(string name)
+    {
+        if (name.Length == 0 || !name.Contains('.'))
+        {
+            return false;
+        }
+
+        return name.Split('.').All(IsIdentifier);
+    }
+
+    private static string JoinTrimmedBlock(List<string> lines)
+    {
+        var start = 0;
+        var end = lines.Count - 1;
+
+        while (start <= end && lines[start].Trim().Length == 0)
+        {
+            start++;
+        }
+
+        while (end >= start && lines[end].Trim().Length == 0)
+        {
+            end--;
+        }
+
+        return start > end ? string.Empty : string.Join("\n", lines.GetRange(start, end - start + 1));
+    }
+
+    private static int LongestCommonWhitespacePrefix(List<string> lines)
+    {
+        string? prefix = null;
+
+        foreach (var line in lines)
+        {
+            if (line.Trim().Length == 0)
+            {
+                continue;
+            }
+
+            var indent = line[..FirstNonWhitespaceIndex(line)];
+
+            if (prefix is null)
+            {
+                prefix = indent;
+
+                continue;
+            }
+
+            var common = 0;
+
+            while (common < prefix.Length && common < indent.Length && prefix[common] == indent[common])
+            {
+                common++;
+            }
+
+            prefix = prefix[..common];
+        }
+
+        return prefix?.Length ?? 0;
+    }
+
+    // -------------------------------------------------------- lexical helpers
+
+    private static List<string> NormalizeLines(string content)
+    {
+        var text = content.Length > 0 && content[0] == '﻿' ? content[1..] : content;
+        var builder = new StringBuilder(text.Length);
+
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\r')
+            {
+                builder.Append('\n');
+
+                if (i + 1 < text.Length && text[i + 1] == '\n')
+                {
+                    i++;
+                }
+
+                continue;
+            }
+
+            builder.Append(text[i]);
+        }
+
+        return [.. builder.ToString().Split('\n')];
+    }
+
+    // ------------------------------------------------------------- attributes
+
+    private static void ParseAttribute(string key, string value, int lineNumber, SGWRoomParseContext context)
+    {
+        var lowerKey = key.ToLowerInvariant();
+
+        if (lowerKey != "sector" && lowerKey != "flags")
+        {
+            context.Report(SGWDiagnosticCode.UnknownAttribute, lineNumber, $"unknown attribute '{key}'");
+
+            return;
+        }
+
+        if (lowerKey == "sector" && context.SawSector || lowerKey == "flags" && context.SawFlags)
+        {
+            context.Report(SGWDiagnosticCode.DuplicateAttribute, lineNumber, $"duplicate '{lowerKey}' attribute");
+
+            return;
+        }
+
+        var trimmedValue = value.Trim();
+
+        if (trimmedValue.Length == 0)
+        {
+            context.Report(
+                SGWDiagnosticCode.EmptyAttributeValue,
+                lineNumber,
+                $"attribute '{lowerKey}' has an empty value"
             );
 
             return;
         }
 
-        var target = world.GetRoom(exit.TargetVnum);
-
-        if (target is null)
+        if (lowerKey == "sector")
         {
-            diagnostics.Add(
-                new SGWDiagnostic(
-                    room.SourceFile,
-                    exit.SourceLine,
-                    SGWDiagnosticCode.ExitToUnknownRoom,
-                    $"exit '{name}' points to unknown room vnum {exit.TargetVnum}"
-                )
+            context.SawSector = true;
+            ParseSector(trimmedValue, lineNumber, context);
+
+            return;
+        }
+
+        context.SawFlags = true;
+        ParseFlags(trimmedValue, lineNumber, context);
+    }
+
+    // ------------------------------------------------------------------ exits
+
+    private static void ParseExitLine(string trimmed, int lineNumber, SGWRoomParseContext context)
+    {
+        var position = SkipWhitespace(trimmed, 1);
+        var directionToken = ReadToken(trimmed, ref position);
+
+        if (!SGWTokenTables.Directions.TryGetValue(directionToken.ToLowerInvariant(), out var direction))
+        {
+            context.Report(SGWDiagnosticCode.UnknownDirection, lineNumber, $"unknown direction '{directionToken}'");
+
+            return;
+        }
+
+        position = SkipWhitespace(trimmed, position);
+
+        if (!TryReadVnum(trimmed, ref position, lineNumber, context, out var target))
+        {
+            return;
+        }
+
+        var exit = new SGWExit { Direction = direction, TargetVnum = target, SourceLine = lineNumber };
+
+        position = SkipWhitespace(trimmed, position);
+
+        if (position < trimmed.Length && !TryParseDoorSpec(trimmed, ref position, lineNumber, exit, context))
+        {
+            return;
+        }
+
+        if (!context.SeenDirections.Add(direction))
+        {
+            context.Report(
+                SGWDiagnosticCode.DuplicateExit,
+                lineNumber,
+                $"duplicate exit '{SGWTokenTables.DirectionName(direction)}' in room {context.Room.Id}"
             );
 
             return;
         }
 
-        linked.Add(target.Id);
+        context.Room.Exits.Add(exit);
+    }
 
-        var opposite = SGWTokenTables.Opposite(exit.Direction);
+    private static void ParseExtraOpener(string trimmed, int lineNumber, SGWRoomParseContext context)
+    {
+        context.ResetExtra();
+        context.ExtraLine = lineNumber;
 
-        if (target.Exits.Exists(e => e.Direction == opposite && e.TargetVnum == room.Id))
+        var position = SkipWhitespace(trimmed, "extra".Length);
+
+        if (!TryReadQuotedString(trimmed, ref position, lineNumber, context, out var keywordList))
         {
             return;
         }
 
-        diagnostics.Add(
-            new SGWDiagnostic(
-                room.SourceFile,
-                exit.SourceLine,
-                SGWDiagnosticCode.OneWayExit,
-                $"exit '{name}' to room {exit.TargetVnum} is one-way"
-            )
-        );
+        position = SkipWhitespace(trimmed, position);
+
+        if (position >= trimmed.Length || trimmed[position] != ':')
+        {
+            context.Report(
+                SGWDiagnosticCode.MalformedExtraHeader,
+                lineNumber,
+                "malformed extra description header, expected ':' after the keyword list"
+            );
+
+            return;
+        }
+
+        var keywords = keywordList
+                       .Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
+                       .Select(k => k.ToLowerInvariant())
+                       .ToList();
+
+        if (keywords.Count == 0)
+        {
+            context.Report(
+                SGWDiagnosticCode.EmptyExtraKeywordList,
+                lineNumber,
+                "extra description has an empty keyword list"
+            );
+
+            return;
+        }
+
+        foreach (var keyword in keywords.Where(keyword => !context.SeenKeywords.Add(keyword)))
+        {
+            context.Report(
+                SGWDiagnosticCode.DuplicateExtraKeyword,
+                lineNumber,
+                $"duplicate extra keyword '{keyword}' in room {context.Room.Id}"
+            );
+
+            return;
+        }
+
+        context.ExtraInline = trimmed[(position + 1)..];
+        context.ExtraKeywords = keywords;
+    }
+
+    private static void ParseFlags(string value, int lineNumber, SGWRoomParseContext context)
+    {
+        var tokens = value.Split((char[])[' ', '\t', ','], StringSplitOptions.RemoveEmptyEntries);
+        var flags = new List<RoomFlag>();
+        var hasNone = false;
+
+        foreach (var token in tokens)
+        {
+            var lower = token.ToLowerInvariant();
+
+            if (lower == "none")
+            {
+                if (hasNone)
+                {
+                    context.Report(SGWDiagnosticCode.DuplicateRoomFlag, lineNumber, $"duplicate room flag '{token}'");
+
+                    continue;
+                }
+
+                hasNone = true;
+
+                continue;
+            }
+
+            if (!SGWTokenTables.Flags.TryGetValue(lower, out var flag))
+            {
+                context.Report(SGWDiagnosticCode.UnknownRoomFlag, lineNumber, $"unknown room flag '{token}'");
+
+                continue;
+            }
+
+            if (flags.Contains(flag))
+            {
+                context.Report(SGWDiagnosticCode.DuplicateRoomFlag, lineNumber, $"duplicate room flag '{token}'");
+
+                continue;
+            }
+
+            flags.Add(flag);
+        }
+
+        if (hasNone && flags.Count > 0)
+        {
+            context.Report(
+                SGWDiagnosticCode.NoneFlagCombined,
+                lineNumber,
+                "flag 'none' cannot be combined with other flags"
+            );
+
+            return;
+        }
+
+        context.Room.Flags = flags;
     }
 
     // ------------------------------------------------------------- line loop
@@ -439,95 +798,54 @@ public class SGWFileParser : ISGWFileParser
         context.DescriptionLines.Add(literal);
     }
 
-    private static SGWRoomParseResult Finish(SGWRoomParseContext context)
+    // ---------------------------------------------------------------- scripts
+
+    private static void ParseScriptLine(string trimmed, int lineNumber, SGWRoomParseContext context)
     {
-        var result = new SGWRoomParseResult { Diagnostics = context.Diagnostics };
+        var position = SkipWhitespace(trimmed, "@script".Length);
+        var eventToken = ReadToken(trimmed, ref position);
+        var eventName = eventToken.ToLowerInvariant();
 
-        FlushExtra(context);
-
-        if (context.HeaderLine == 0)
+        if (!SGWTokenTables.ScriptEvents.Contains(eventName))
         {
-            return result;
-        }
-
-        if (!context.Closed)
-        {
-            context.Report(
-                SGWDiagnosticCode.UnterminatedRoomBlock,
-                context.HeaderLine,
-                "unterminated room block, expected '@end' before end of file"
-            );
-        }
-
-        context.Room.Description = AssembleDescription(context.DescriptionLines);
-
-        if (!context.SawSector)
-        {
-            context.Report(
-                SGWDiagnosticCode.MissingSector,
-                context.HeaderLine,
-                $"room {context.Room.Id} is missing the required 'sector' attribute"
-            );
-        }
-
-        if (context.Room.Description.Length == 0)
-        {
-            context.Report(
-                SGWDiagnosticCode.MissingDescription,
-                context.HeaderLine,
-                $"room {context.Room.Id} has no description"
-            );
-        }
-
-        // A room that produced any error is excluded from the world (spec 5.5 rule 27).
-        result.Room = result.HasErrors ? null : context.Room;
-
-        return result;
-    }
-
-    // ------------------------------------------------------------- attributes
-
-    private static void ParseAttribute(string key, string value, int lineNumber, SGWRoomParseContext context)
-    {
-        var lowerKey = key.ToLowerInvariant();
-
-        if (lowerKey != "sector" && lowerKey != "flags")
-        {
-            context.Report(SGWDiagnosticCode.UnknownAttribute, lineNumber, $"unknown attribute '{key}'");
+            context.Report(SGWDiagnosticCode.UnknownScriptEvent, lineNumber, $"unknown script event '{eventToken}'");
 
             return;
         }
 
-        if ((lowerKey == "sector" && context.SawSector) || (lowerKey == "flags" && context.SawFlags))
-        {
-            context.Report(SGWDiagnosticCode.DuplicateAttribute, lineNumber, $"duplicate '{lowerKey}' attribute");
+        position = SkipWhitespace(trimmed, position);
+        var scriptName = ReadToken(trimmed, ref position);
 
-            return;
-        }
-
-        var trimmedValue = value.Trim();
-
-        if (trimmedValue.Length == 0)
+        if (!IsQualifiedName(scriptName))
         {
             context.Report(
-                SGWDiagnosticCode.EmptyAttributeValue,
+                SGWDiagnosticCode.NotFullyQualifiedScriptName,
                 lineNumber,
-                $"attribute '{lowerKey}' has an empty value"
+                $"'{scriptName}' is not a fully qualified script name"
             );
 
             return;
         }
 
-        if (lowerKey == "sector")
+        if (SkipWhitespace(trimmed, position) < trimmed.Length)
         {
-            context.SawSector = true;
-            ParseSector(trimmedValue, lineNumber, context);
+            context.Report(SGWDiagnosticCode.TextAfterScriptName, lineNumber, "unexpected text after script name");
 
             return;
         }
 
-        context.SawFlags = true;
-        ParseFlags(trimmedValue, lineNumber, context);
+        if (context.Room.Scripts.ContainsKey(eventName))
+        {
+            context.Report(
+                SGWDiagnosticCode.DuplicateScriptEvent,
+                lineNumber,
+                $"duplicate script event '{eventName}' in room {context.Room.Id}"
+            );
+
+            return;
+        }
+
+        context.Room.AddScript(eventName, scriptName);
     }
 
     private static void ParseSector(string value, int lineNumber, SGWRoomParseContext context)
@@ -555,136 +873,124 @@ public class SGWFileParser : ISGWFileParser
         context.Room.Sector = canonical;
     }
 
-    private static void ParseFlags(string value, int lineNumber, SGWRoomParseContext context)
+    private static string ReadToken(string text, ref int position)
     {
-        var tokens = value.Split((char[])[' ', '\t', ','], StringSplitOptions.RemoveEmptyEntries);
-        var flags = new List<RoomFlag>();
-        var hasNone = false;
+        var start = position;
 
-        foreach (var token in tokens)
+        while (position < text.Length && !char.IsWhiteSpace(text[position]))
         {
-            var lower = token.ToLowerInvariant();
-
-            if (lower == "none")
-            {
-                if (hasNone)
-                {
-                    context.Report(SGWDiagnosticCode.DuplicateRoomFlag, lineNumber, $"duplicate room flag '{token}'");
-
-                    continue;
-                }
-
-                hasNone = true;
-
-                continue;
-            }
-
-            if (!SGWTokenTables.Flags.TryGetValue(lower, out var flag))
-            {
-                context.Report(SGWDiagnosticCode.UnknownRoomFlag, lineNumber, $"unknown room flag '{token}'");
-
-                continue;
-            }
-
-            if (flags.Contains(flag))
-            {
-                context.Report(SGWDiagnosticCode.DuplicateRoomFlag, lineNumber, $"duplicate room flag '{token}'");
-
-                continue;
-            }
-
-            flags.Add(flag);
+            position++;
         }
 
-        if (hasNone && flags.Count > 0)
-        {
-            context.Report(
-                SGWDiagnosticCode.NoneFlagCombined,
-                lineNumber,
-                "flag 'none' cannot be combined with other flags"
-            );
-
-            return;
-        }
-
-        context.Room.Flags = flags;
+        return text[start..position];
     }
 
-    // ----------------------------------------------------------------- header
-
-    private static bool TryParseHeader(string trimmed, int lineNumber, SGWRoomParseContext context)
+    private static int SkipWhitespace(string text, int position)
     {
-        var position = SkipWhitespace(trimmed, "@room".Length);
+        while (position < text.Length && char.IsWhiteSpace(text[position]))
+        {
+            position++;
+        }
 
-        if (!TryReadVnum(trimmed, ref position, lineNumber, context, out var vnum))
+        return position;
+    }
+
+    private static bool TryAppendEscape(
+        char escaped,
+        int lineNumber,
+        StringBuilder builder,
+        SGWRoomParseContext context
+    )
+    {
+        switch (escaped)
+        {
+            case '"':
+                builder.Append('"');
+
+                return true;
+            case '\\':
+                builder.Append('\\');
+
+                return true;
+            case 'n':
+                builder.Append('\n');
+
+                return true;
+            case 't':
+                builder.Append('\t');
+
+                return true;
+            default:
+                context.Report(
+                    SGWDiagnosticCode.InvalidEscapeSequence,
+                    lineNumber,
+                    $"invalid escape sequence '\\{escaped}' in quoted string"
+                );
+
+                return false;
+        }
+    }
+
+    private static bool TryParseDoorModifier(
+        string modifier,
+        int lineNumber,
+        SGWDoor door,
+        SGWRoomParseContext context
+    )
+    {
+        if (modifier.Equals("locked", StringComparison.OrdinalIgnoreCase))
+        {
+            if (door.IsLocked)
+            {
+                context.Report(SGWDiagnosticCode.DuplicateDoorModifier, lineNumber, "duplicate door modifier 'locked'");
+
+                return false;
+            }
+
+            door.IsLocked = true;
+
+            return true;
+        }
+
+        if (!modifier.StartsWith("key", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Report(
+                SGWDiagnosticCode.UnexpectedTextAfterExit,
+                lineNumber,
+                "unexpected text after exit definition"
+            );
+
+            return false;
+        }
+
+        if (modifier.Length <= "key=".Length || modifier["key".Length] != '=')
+        {
+            context.Report(
+                SGWDiagnosticCode.MalformedKeyModifier,
+                lineNumber,
+                "'key' expects the form key=<vnum> with no spaces"
+            );
+
+            return false;
+        }
+
+        if (door.KeyVnum.HasValue)
+        {
+            context.Report(SGWDiagnosticCode.DuplicateDoorModifier, lineNumber, "duplicate door modifier 'key'");
+
+            return false;
+        }
+
+        var keyPosition = 0;
+
+        if (!TryReadVnum(modifier["key=".Length..], ref keyPosition, lineNumber, context, out var keyVnum))
         {
             return false;
         }
 
-        position = SkipWhitespace(trimmed, position);
-
-        if (!TryReadQuotedString(trimmed, ref position, lineNumber, context, out var name))
-        {
-            return false;
-        }
-
-        if (SkipWhitespace(trimmed, position) < trimmed.Length)
-        {
-            context.Report(SGWDiagnosticCode.TextAfterRoomName, lineNumber, "unexpected text after room name");
-
-            return false;
-        }
-
-        context.Room.Id = vnum;
-        context.Room.Name = name;
-        context.Room.SourceFile = context.FileName;
-        context.Room.SourceLine = lineNumber;
+        door.KeyVnum = keyVnum;
 
         return true;
-    }
-
-    // ------------------------------------------------------------------ exits
-
-    private static void ParseExitLine(string trimmed, int lineNumber, SGWRoomParseContext context)
-    {
-        var position = SkipWhitespace(trimmed, 1);
-        var directionToken = ReadToken(trimmed, ref position);
-
-        if (!SGWTokenTables.Directions.TryGetValue(directionToken.ToLowerInvariant(), out var direction))
-        {
-            context.Report(SGWDiagnosticCode.UnknownDirection, lineNumber, $"unknown direction '{directionToken}'");
-
-            return;
-        }
-
-        position = SkipWhitespace(trimmed, position);
-
-        if (!TryReadVnum(trimmed, ref position, lineNumber, context, out var target))
-        {
-            return;
-        }
-
-        var exit = new SGWExit { Direction = direction, TargetVnum = target, SourceLine = lineNumber };
-
-        position = SkipWhitespace(trimmed, position);
-
-        if (position < trimmed.Length && !TryParseDoorSpec(trimmed, ref position, lineNumber, exit, context))
-        {
-            return;
-        }
-
-        if (!context.SeenDirections.Add(direction))
-        {
-            context.Report(
-                SGWDiagnosticCode.DuplicateExit,
-                lineNumber,
-                $"duplicate exit '{SGWTokenTables.DirectionName(direction)}' in room {context.Room.Id}"
-            );
-
-            return;
-        }
-
-        context.Room.Exits.Add(exit);
     }
 
     private static bool TryParseDoorSpec(
@@ -750,406 +1056,35 @@ public class SGWFileParser : ISGWFileParser
         return true;
     }
 
-    private static bool TryParseDoorModifier(
-        string modifier,
-        int lineNumber,
-        SGWDoor door,
-        SGWRoomParseContext context
-    )
+    // ----------------------------------------------------------------- header
+
+    private static bool TryParseHeader(string trimmed, int lineNumber, SGWRoomParseContext context)
     {
-        if (modifier.Equals("locked", StringComparison.OrdinalIgnoreCase))
-        {
-            if (door.IsLocked)
-            {
-                context.Report(SGWDiagnosticCode.DuplicateDoorModifier, lineNumber, "duplicate door modifier 'locked'");
+        var position = SkipWhitespace(trimmed, "@room".Length);
 
-                return false;
-            }
-
-            door.IsLocked = true;
-
-            return true;
-        }
-
-        if (!modifier.StartsWith("key", StringComparison.OrdinalIgnoreCase))
-        {
-            context.Report(
-                SGWDiagnosticCode.UnexpectedTextAfterExit,
-                lineNumber,
-                "unexpected text after exit definition"
-            );
-
-            return false;
-        }
-
-        if (modifier.Length <= "key=".Length || modifier["key".Length] != '=')
-        {
-            context.Report(
-                SGWDiagnosticCode.MalformedKeyModifier,
-                lineNumber,
-                "'key' expects the form key=<vnum> with no spaces"
-            );
-
-            return false;
-        }
-
-        if (door.KeyVnum.HasValue)
-        {
-            context.Report(SGWDiagnosticCode.DuplicateDoorModifier, lineNumber, "duplicate door modifier 'key'");
-
-            return false;
-        }
-
-        var keyPosition = 0;
-
-        if (!TryReadVnum(modifier["key=".Length..], ref keyPosition, lineNumber, context, out var keyVnum))
+        if (!TryReadVnum(trimmed, ref position, lineNumber, context, out var vnum))
         {
             return false;
-        }
-
-        door.KeyVnum = keyVnum;
-
-        return true;
-    }
-
-    // ---------------------------------------------------------------- scripts
-
-    private static void ParseScriptLine(string trimmed, int lineNumber, SGWRoomParseContext context)
-    {
-        var position = SkipWhitespace(trimmed, "@script".Length);
-        var eventToken = ReadToken(trimmed, ref position);
-        var eventName = eventToken.ToLowerInvariant();
-
-        if (!SGWTokenTables.ScriptEvents.Contains(eventName))
-        {
-            context.Report(SGWDiagnosticCode.UnknownScriptEvent, lineNumber, $"unknown script event '{eventToken}'");
-
-            return;
         }
 
         position = SkipWhitespace(trimmed, position);
-        var scriptName = ReadToken(trimmed, ref position);
 
-        if (!IsQualifiedName(scriptName))
+        if (!TryReadQuotedString(trimmed, ref position, lineNumber, context, out var name))
         {
-            context.Report(
-                SGWDiagnosticCode.NotFullyQualifiedScriptName,
-                lineNumber,
-                $"'{scriptName}' is not a fully qualified script name"
-            );
-
-            return;
+            return false;
         }
 
         if (SkipWhitespace(trimmed, position) < trimmed.Length)
         {
-            context.Report(SGWDiagnosticCode.TextAfterScriptName, lineNumber, "unexpected text after script name");
-
-            return;
-        }
-
-        if (context.Room.Scripts.ContainsKey(eventName))
-        {
-            context.Report(
-                SGWDiagnosticCode.DuplicateScriptEvent,
-                lineNumber,
-                $"duplicate script event '{eventName}' in room {context.Room.Id}"
-            );
-
-            return;
-        }
-
-        context.Room.AddScript(eventName, scriptName);
-    }
-
-    // ----------------------------------------------------------------- extras
-
-    private static bool IsExtraOpener(string trimmed)
-    {
-        if (!trimmed.StartsWith("extra", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var position = "extra".Length;
-
-        if (position >= trimmed.Length || !char.IsWhiteSpace(trimmed[position]))
-        {
-            return false;
-        }
-
-        position = SkipWhitespace(trimmed, position);
-
-        // The grammar requires a quoted keyword list; without it the line is prose.
-        return position < trimmed.Length && trimmed[position] == '"';
-    }
-
-    private static void ParseExtraOpener(string trimmed, int lineNumber, SGWRoomParseContext context)
-    {
-        context.ResetExtra();
-        context.ExtraLine = lineNumber;
-
-        var position = SkipWhitespace(trimmed, "extra".Length);
-
-        if (!TryReadQuotedString(trimmed, ref position, lineNumber, context, out var keywordList))
-        {
-            return;
-        }
-
-        position = SkipWhitespace(trimmed, position);
-
-        if (position >= trimmed.Length || trimmed[position] != ':')
-        {
-            context.Report(
-                SGWDiagnosticCode.MalformedExtraHeader,
-                lineNumber,
-                "malformed extra description header, expected ':' after the keyword list"
-            );
-
-            return;
-        }
-
-        var keywords = keywordList
-                       .Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries)
-                       .Select(k => k.ToLowerInvariant())
-                       .ToList();
-
-        if (keywords.Count == 0)
-        {
-            context.Report(
-                SGWDiagnosticCode.EmptyExtraKeywordList,
-                lineNumber,
-                "extra description has an empty keyword list"
-            );
-
-            return;
-        }
-
-        foreach (var keyword in keywords.Where(keyword => !context.SeenKeywords.Add(keyword)))
-        {
-            context.Report(
-                SGWDiagnosticCode.DuplicateExtraKeyword,
-                lineNumber,
-                $"duplicate extra keyword '{keyword}' in room {context.Room.Id}"
-            );
-
-            return;
-        }
-
-        context.ExtraInline = trimmed[(position + 1)..];
-        context.ExtraKeywords = keywords;
-    }
-
-    private static void FlushExtra(SGWRoomParseContext context)
-    {
-        if (context.ExtraKeywords is null)
-        {
-            return;
-        }
-
-        var text = AssembleExtraText(context.ExtraInline, context.ExtraContinuations);
-
-        if (text.Length == 0)
-        {
-            var label = context.ExtraKeywords.Count > 0 ? context.ExtraKeywords[0] : string.Empty;
-            context.Report(
-                SGWDiagnosticCode.EmptyExtraText,
-                context.ExtraLine,
-                $"extra description '{label}' has no text"
-            );
-        }
-        else
-        {
-            context.Room.Extras.Add(new SGWExtraDescription { Keywords = context.ExtraKeywords, Text = text });
-        }
-
-        context.ResetExtra();
-    }
-
-    // --------------------------------------------------------- text assembly
-
-    private static string AssembleDescription(List<string> lines)
-    {
-        return JoinTrimmedBlock(lines.Select(l => l.TrimEnd()).ToList());
-    }
-
-    private static string AssembleExtraText(string inlineText, List<string> continuations)
-    {
-        var lines = new List<string>();
-        var inline = inlineText.Trim();
-
-        if (inline.Length > 0)
-        {
-            lines.Add(inline);
-        }
-
-        var prefix = LongestCommonWhitespacePrefix(continuations);
-
-        foreach (var continuation in continuations)
-        {
-            if (continuation.Trim().Length == 0)
-            {
-                lines.Add(string.Empty);
-
-                continue;
-            }
-
-            lines.Add(continuation[prefix..].TrimEnd());
-        }
-
-        return JoinTrimmedBlock(lines);
-    }
-
-    private static int LongestCommonWhitespacePrefix(List<string> lines)
-    {
-        string? prefix = null;
-
-        foreach (var line in lines)
-        {
-            if (line.Trim().Length == 0)
-            {
-                continue;
-            }
-
-            var indent = line[..FirstNonWhitespaceIndex(line)];
-
-            if (prefix is null)
-            {
-                prefix = indent;
-
-                continue;
-            }
-
-            var common = 0;
-
-            while (common < prefix.Length && common < indent.Length && prefix[common] == indent[common])
-            {
-                common++;
-            }
-
-            prefix = prefix[..common];
-        }
-
-        return prefix?.Length ?? 0;
-    }
-
-    private static string JoinTrimmedBlock(List<string> lines)
-    {
-        var start = 0;
-        var end = lines.Count - 1;
-
-        while (start <= end && lines[start].Trim().Length == 0)
-        {
-            start++;
-        }
-
-        while (end >= start && lines[end].Trim().Length == 0)
-        {
-            end--;
-        }
-
-        return start > end ? string.Empty : string.Join("\n", lines.GetRange(start, end - start + 1));
-    }
-
-    // -------------------------------------------------------- lexical helpers
-
-    private static List<string> NormalizeLines(string content)
-    {
-        var text = content.Length > 0 && content[0] == '﻿' ? content[1..] : content;
-        var builder = new StringBuilder(text.Length);
-
-        for (var i = 0; i < text.Length; i++)
-        {
-            if (text[i] == '\r')
-            {
-                builder.Append('\n');
-
-                if (i + 1 < text.Length && text[i + 1] == '\n')
-                {
-                    i++;
-                }
-
-                continue;
-            }
-
-            builder.Append(text[i]);
-        }
-
-        return [.. builder.ToString().Split('\n')];
-    }
-
-    private static int FirstNonWhitespaceIndex(string line)
-    {
-        for (var i = 0; i < line.Length; i++)
-        {
-            if (!char.IsWhiteSpace(line[i]))
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    private static int SkipWhitespace(string text, int position)
-    {
-        while (position < text.Length && char.IsWhiteSpace(text[position]))
-        {
-            position++;
-        }
-
-        return position;
-    }
-
-    private static string FirstToken(string trimmed)
-    {
-        var position = 0;
-
-        return ReadToken(trimmed, ref position);
-    }
-
-    private static string ReadToken(string text, ref int position)
-    {
-        var start = position;
-
-        while (position < text.Length && !char.IsWhiteSpace(text[position]))
-        {
-            position++;
-        }
-
-        return text[start..position];
-    }
-
-    private static bool TryReadVnum(
-        string text,
-        ref int position,
-        int lineNumber,
-        SGWRoomParseContext context,
-        out int vnum
-    )
-    {
-        vnum = 0;
-        var token = ReadToken(text, ref position);
-
-        if (token.Length == 0 || !token.All(char.IsAsciiDigit))
-        {
-            context.Report(SGWDiagnosticCode.ExpectedVnum, lineNumber, $"expected a room vnum, found '{token}'");
+            context.Report(SGWDiagnosticCode.TextAfterRoomName, lineNumber, "unexpected text after room name");
 
             return false;
         }
 
-        if (!long.TryParse(token, out var value) || value < MinVnum || value > MaxVnum)
-        {
-            context.Report(
-                SGWDiagnosticCode.VnumOutOfRange,
-                lineNumber,
-                $"room vnum {token.TrimStart('0').PadLeft(1, '0')} out of range, expected {MinVnum}..{MaxVnum}"
-            );
-
-            return false;
-        }
-
-        vnum = (int)value;
+        context.Room.Id = vnum;
+        context.Room.Name = name;
+        context.Room.SourceFile = context.FileName;
+        context.Room.SourceLine = lineNumber;
 
         return true;
     }
@@ -1212,40 +1147,38 @@ public class SGWFileParser : ISGWFileParser
         return false;
     }
 
-    private static bool TryAppendEscape(
-        char escaped,
+    private static bool TryReadVnum(
+        string text,
+        ref int position,
         int lineNumber,
-        StringBuilder builder,
-        SGWRoomParseContext context
+        SGWRoomParseContext context,
+        out int vnum
     )
     {
-        switch (escaped)
+        vnum = 0;
+        var token = ReadToken(text, ref position);
+
+        if (token.Length == 0 || !token.All(char.IsAsciiDigit))
         {
-            case '"':
-                builder.Append('"');
+            context.Report(SGWDiagnosticCode.ExpectedVnum, lineNumber, $"expected a room vnum, found '{token}'");
 
-                return true;
-            case '\\':
-                builder.Append('\\');
-
-                return true;
-            case 'n':
-                builder.Append('\n');
-
-                return true;
-            case 't':
-                builder.Append('\t');
-
-                return true;
-            default:
-                context.Report(
-                    SGWDiagnosticCode.InvalidEscapeSequence,
-                    lineNumber,
-                    $"invalid escape sequence '\\{escaped}' in quoted string"
-                );
-
-                return false;
+            return false;
         }
+
+        if (!long.TryParse(token, out var value) || value < MinVnum || value > MaxVnum)
+        {
+            context.Report(
+                SGWDiagnosticCode.VnumOutOfRange,
+                lineNumber,
+                $"room vnum {token.TrimStart('0').PadLeft(1, '0')} out of range, expected {MinVnum}..{MaxVnum}"
+            );
+
+            return false;
+        }
+
+        vnum = (int)value;
+
+        return true;
     }
 
     private static bool TrySplitAttribute(string trimmed, out string key, out string value)
@@ -1253,7 +1186,7 @@ public class SGWFileParser : ISGWFileParser
         key = string.Empty;
         value = string.Empty;
 
-        if (trimmed.Length == 0 || (!char.IsAsciiLetter(trimmed[0]) && trimmed[0] != '_'))
+        if (trimmed.Length == 0 || !char.IsAsciiLetter(trimmed[0]) && trimmed[0] != '_')
         {
             return false;
         }
@@ -1279,23 +1212,87 @@ public class SGWFileParser : ISGWFileParser
         return true;
     }
 
-    private static bool IsQualifiedName(string name)
+    private static void ValidateExit(
+        SGWWorld world,
+        SGWRoom room,
+        SGWExit exit,
+        HashSet<int> linked,
+        List<SGWDiagnostic> diagnostics
+    )
     {
-        if (name.Length == 0 || !name.Contains('.'))
+        var name = SGWTokenTables.DirectionName(exit.Direction);
+
+        if (exit.TargetVnum == room.Id)
         {
-            return false;
+            diagnostics.Add(
+                new(
+                    room.SourceFile,
+                    exit.SourceLine,
+                    SGWDiagnosticCode.SelfLoopExit,
+                    $"exit '{name}' in room {room.Id} points to itself"
+                )
+            );
+
+            return;
         }
 
-        return name.Split('.').All(IsIdentifier);
+        var target = world.GetRoom(exit.TargetVnum);
+
+        if (target is null)
+        {
+            diagnostics.Add(
+                new(
+                    room.SourceFile,
+                    exit.SourceLine,
+                    SGWDiagnosticCode.ExitToUnknownRoom,
+                    $"exit '{name}' points to unknown room vnum {exit.TargetVnum}"
+                )
+            );
+
+            return;
+        }
+
+        linked.Add(target.Id);
+
+        var opposite = SGWTokenTables.Opposite(exit.Direction);
+
+        if (target.Exits.Exists(e => e.Direction == opposite && e.TargetVnum == room.Id))
+        {
+            return;
+        }
+
+        diagnostics.Add(
+            new(
+                room.SourceFile,
+                exit.SourceLine,
+                SGWDiagnosticCode.OneWayExit,
+                $"exit '{name}' to room {exit.TargetVnum} is one-way"
+            )
+        );
     }
 
-    private static bool IsIdentifier(string segment)
+    private static void ValidateWorld(SGWWorld world, List<SGWDiagnostic> diagnostics)
     {
-        if (segment.Length == 0 || (!char.IsAsciiLetter(segment[0]) && segment[0] != '_'))
+        var linked = new HashSet<int>();
+
+        foreach (var room in world.Rooms.Values)
         {
-            return false;
+            foreach (var exit in room.Exits)
+            {
+                ValidateExit(world, room, exit, linked, diagnostics);
+            }
         }
 
-        return segment.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+        foreach (var room in world.Rooms.Values.Where(room => !linked.Contains(room.Id)))
+        {
+            diagnostics.Add(
+                new(
+                    room.SourceFile,
+                    room.SourceLine,
+                    SGWDiagnosticCode.UnreachableRoom,
+                    $"room {room.Id} is unreachable, no room links to it"
+                )
+            );
+        }
     }
 }

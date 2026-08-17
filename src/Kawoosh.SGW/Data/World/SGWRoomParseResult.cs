@@ -12,12 +12,9 @@ public class SGWRoomParseResult
     public SGWRoom? Room { get; set; }
     public List<SGWDiagnostic> Diagnostics { get; set; } = [];
 
-    public bool HasErrors
-        => Diagnostics.Exists(d => d.Severity == SGWDiagnosticSeverity.Error);
+    public bool HasErrors => Diagnostics.Exists(d => d.Severity == SGWDiagnosticSeverity.Error);
 
-    public IEnumerable<SGWDiagnostic> Errors
-        => Diagnostics.Where(d => d.Severity == SGWDiagnosticSeverity.Error);
+    public IEnumerable<SGWDiagnostic> Errors => Diagnostics.Where(d => d.Severity == SGWDiagnosticSeverity.Error);
 
-    public IEnumerable<SGWDiagnostic> Warnings
-        => Diagnostics.Where(d => d.Severity == SGWDiagnosticSeverity.Warning);
+    public IEnumerable<SGWDiagnostic> Warnings => Diagnostics.Where(d => d.Severity == SGWDiagnosticSeverity.Warning);
 }

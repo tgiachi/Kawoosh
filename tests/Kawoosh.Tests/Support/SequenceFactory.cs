@@ -15,6 +15,6 @@ public static class SequenceFactory
             last = last.Append(segments[i]);
         }
 
-        return new ReadOnlySequence<byte>(first, 0, last, last.Memory.Length);
+        return new(first, 0, last, last.Memory.Length);
     }
 }

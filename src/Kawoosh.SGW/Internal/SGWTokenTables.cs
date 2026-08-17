@@ -77,14 +77,11 @@ internal static class SGWTokenTables
         new HashSet<string>(StringComparer.Ordinal) { "enter", "exit", "look" };
 
     public static string DirectionName(SGWDirection direction)
-    {
-        return direction.ToString().ToLowerInvariant();
-    }
+        => direction.ToString().ToLowerInvariant();
 
     /// <summary>The reciprocal of a direction, used by the one-way exit report (spec 3).</summary>
     public static SGWDirection Opposite(SGWDirection direction)
-    {
-        return direction switch
+        => direction switch
         {
             SGWDirection.North => SGWDirection.South,
             SGWDirection.South => SGWDirection.North,
@@ -93,5 +90,4 @@ internal static class SGWTokenTables
             SGWDirection.Up    => SGWDirection.Down,
             _                  => SGWDirection.Up
         };
-    }
 }

@@ -1,4 +1,3 @@
-using Kawoosh.SGW.Data;
 using Kawoosh.SGW.Data.Diagnostic;
 
 namespace Kawoosh.SGW.Exceptions;
@@ -21,7 +20,5 @@ public class SGWParseException : Exception
     }
 
     private static string BuildMessage(IReadOnlyList<SGWDiagnostic> diagnostics)
-    {
-        return string.Join(Environment.NewLine, diagnostics.Select(d => d.ToString()));
-    }
+        => string.Join(Environment.NewLine, diagnostics.Select(d => d.ToString()));
 }

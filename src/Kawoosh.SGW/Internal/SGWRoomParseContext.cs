@@ -1,4 +1,3 @@
-using Kawoosh.SGW.Data;
 using Kawoosh.SGW.Data.Diagnostic;
 using Kawoosh.SGW.Data.World;
 using Kawoosh.SGW.Types;
@@ -36,9 +35,7 @@ internal class SGWRoomParseContext
     }
 
     public void Report(SGWDiagnosticCode code, int line, string message)
-    {
-        Diagnostics.Add(new SGWDiagnostic(FileName, line, code, message));
-    }
+        => Diagnostics.Add(new(FileName, line, code, message));
 
     public void ResetExtra()
     {

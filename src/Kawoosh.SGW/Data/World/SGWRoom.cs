@@ -18,13 +18,11 @@ public class SGWRoom
     /// <summary>File this room was read from, used as the location of world-level diagnostics.</summary>
     public string SourceFile { get; set; } = string.Empty;
 
-    /// <summary>1-based line of the '@room' header inside <see cref="SourceFile"/>.</summary>
+    /// <summary>1-based line of the '@room' header inside <see cref="SourceFile" />.</summary>
     public int SourceLine { get; set; }
 
     public void AddScript(string scriptName, string scriptContent)
-    {
-        Scripts.TryAdd(scriptName, scriptContent);
-    }
+        => Scripts.TryAdd(scriptName, scriptContent);
 
     public override string ToString()
         => $"Room(Id: {Id}, Name: {Name}, Sector: {Sector}, Flags: [{string.Join(", ", Flags)}])";

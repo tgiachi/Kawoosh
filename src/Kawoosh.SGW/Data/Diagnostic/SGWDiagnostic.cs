@@ -22,7 +22,7 @@ public class SGWDiagnostic
 
     /// <summary>
     /// The spec code as written in the catalogue, for example "E070" or "W001".
-    /// Never printed as part of <see cref="Message"/>.
+    /// Never printed as part of <see cref="Message" />.
     /// </summary>
     public string CodeText
         => Severity == SGWDiagnosticSeverity.Warning
@@ -43,8 +43,8 @@ public class SGWDiagnostic
     public override string ToString()
     {
         var text = Severity == SGWDiagnosticSeverity.Warning
-            ? $"{File}:{Line}: warning: {Message}"
-            : $"{File}:{Line}: {Message}";
+                       ? $"{File}:{Line}: warning: {Message}"
+                       : $"{File}:{Line}: {Message}";
 
         return Related is null ? text : $"{text}{Environment.NewLine}  {Related}";
     }

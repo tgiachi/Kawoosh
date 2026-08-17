@@ -23,25 +23,6 @@ internal static class TelnetLineReader
     private const int OptionCommandLength = 3;
 
     /// <summary>
-    /// Reads one line up to the next line feed. On success the buffer is advanced past the
-    /// line feed and <paramref name="line"/> excludes it. On failure the buffer is untouched,
-    /// so the caller can wait for more bytes.
-    /// </summary>
-    public static bool TryReadLine(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> line)
-    {
-        var reader = new SequenceReader<byte>(buffer);
-
-        if (!reader.TryReadTo(out line, LineFeed))
-        {
-            return false;
-        }
-
-        buffer = buffer.Slice(reader.Position);
-
-        return true;
-    }
-
-    /// <summary>
     /// Removes telnet commands per RFC 854, drops the carriage return of a CRLF client, and
     /// decodes UTF-8. ASCII is a subset of UTF-8, so both client styles decode correctly.
     /// </summary>
@@ -93,7 +74,26 @@ internal static class TelnetLineReader
     }
 
     /// <summary>
-    /// Returns the index just past the command starting at <paramref name="index"/>.
+    /// Reads one line up to the next line feed. On success the buffer is advanced past the
+    /// line feed and <paramref name="line" /> excludes it. On failure the buffer is untouched,
+    /// so the caller can wait for more bytes.
+    /// </summary>
+    public static bool TryReadLine(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> line)
+    {
+        var reader = new SequenceReader<byte>(buffer);
+
+        if (!reader.TryReadTo(out line, LineFeed))
+        {
+            return false;
+        }
+
+        buffer = buffer.Slice(reader.Position);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the index just past the command starting at <paramref name="index" />.
     /// The escaped IAC IAC case is handled by the caller, because it emits data.
     /// </summary>
     private static int SkipCommand(byte[] input, int index, byte command)

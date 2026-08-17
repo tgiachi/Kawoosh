@@ -16,19 +16,13 @@ public class SGWWorld
     /// leaving the existing one untouched so the caller can report the duplicate.
     /// </summary>
     public bool AddRoom(SGWRoom room)
-    {
-        return _rooms.TryAdd(room.Id, room);
-    }
-
-    public SGWRoom? GetRoom(int vnum)
-    {
-        return _rooms.GetValueOrDefault(vnum);
-    }
+        => _rooms.TryAdd(room.Id, room);
 
     public bool Contains(int vnum)
-    {
-        return _rooms.ContainsKey(vnum);
-    }
+        => _rooms.ContainsKey(vnum);
+
+    public SGWRoom? GetRoom(int vnum)
+        => _rooms.GetValueOrDefault(vnum);
 
     public override string ToString()
         => $"World({Count} rooms)";

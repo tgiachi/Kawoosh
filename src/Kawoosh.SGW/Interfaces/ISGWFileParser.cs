@@ -5,6 +5,12 @@ namespace Kawoosh.SGW.Interfaces;
 
 public interface ISGWFileParser
 {
+    /// <summary>
+    /// Parses a single room block and throws when any error diagnostic is produced.
+    /// Content after the first '@end' is ignored.
+    /// </summary>
+    SGWRoom ParseRoom(string content);
+
     /// <summary>Parses a world file from disk.</summary>
     SGWWorld ParseWorld(string filePath);
 
@@ -15,12 +21,6 @@ public interface ISGWFileParser
     /// <param name="diagnostics">A list to collect diagnostics.</param>
     /// <returns></returns>
     SGWWorld ParseWorldFromDirectory(string directoryPath, out List<SGWDiagnostic> diagnostics);
-
-    /// <summary>
-    /// Parses a single room block and throws when any error diagnostic is produced.
-    /// Content after the first '@end' is ignored.
-    /// </summary>
-    SGWRoom ParseRoom(string content);
 
     /// <summary>
     /// Parses every room block in one file without throwing, collecting every diagnostic.

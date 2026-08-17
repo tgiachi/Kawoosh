@@ -1,6 +1,6 @@
 using System.Threading.Channels;
-using Serilog;
 using Kawoosh.Server.Data.Network;
+using Serilog;
 
 namespace Kawoosh.Server.Services;
 

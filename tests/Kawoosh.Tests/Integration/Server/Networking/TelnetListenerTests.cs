@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Text;
 using System.Threading.Channels;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Networking;
@@ -16,39 +17,35 @@ public class TelnetListenerTests
     private Channel<Command> _commands = null!;
     private CancellationTokenSource _cancellation = null!;
 
+    [Test]
+    public void DefaultPort_IsFourThousand()
+        => Assert.That(TelnetListener.DefaultPort, Is.EqualTo(4000));
+
+    [Test]
+    public void Port_WhenZeroWasRequested_IsTheEphemeralPortBoundByTheConstructor()
+    {
+        using var listener = new TelnetListener(EphemeralPort);
+
+        Assert.That(listener.Port, Is.GreaterThan(0));
+    }
+
     [SetUp]
     public void SetUp()
     {
         _commands = Channel.CreateUnbounded<Command>();
-        _cancellation = new CancellationTokenSource(TimeoutMilliseconds);
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        _cancellation.Dispose();
-    }
-
-    private async Task<TcpClient> ConnectAsync(TelnetListener listener)
-    {
-        var client = new TcpClient();
-        await client.ConnectAsync("127.0.0.1", listener.Port, _cancellation.Token);
-
-        return client;
-    }
-
-    private static async Task SendLineAsync(TcpClient client, string text)
-    {
-        var payload = System.Text.Encoding.UTF8.GetBytes(text + "\r\n");
-
-        await client.GetStream().WriteAsync(payload);
-        await client.GetStream().FlushAsync();
+        _cancellation = new(TimeoutMilliseconds);
     }
 
     [Test]
-    public void DefaultPort_IsFourThousand()
+    public async Task StartAsync_Cancelled_StopsWithoutThrowing()
     {
-        Assert.That(TelnetListener.DefaultPort, Is.EqualTo(4000));
+        using var listener = new TelnetListener(EphemeralPort);
+        var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
+
+        using var client = await ConnectAsync(listener);
+        await _cancellation.CancelAsync();
+
+        Assert.That(async () => await accept, Throws.Nothing);
     }
 
     [Test]
@@ -63,31 +60,6 @@ public class TelnetListenerTests
         var command = await _commands.Reader.ReadAsync(_cancellation.Token);
 
         Assert.That(command.Text, Is.EqualTo("look"));
-
-        await _cancellation.CancelAsync();
-        await accept;
-    }
-
-    [Test]
-    public async Task StartAsync_TwoClients_BothAreServed()
-    {
-        using var listener = new TelnetListener(EphemeralPort);
-        var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
-
-        using var first = await ConnectAsync(listener);
-        using var second = await ConnectAsync(listener);
-
-        await SendLineAsync(first, "north");
-        await SendLineAsync(second, "south");
-
-        var one = await _commands.Reader.ReadAsync(_cancellation.Token);
-        var two = await _commands.Reader.ReadAsync(_cancellation.Token);
-
-        Assert.Multiple(() =>
-        {
-            Assert.That(new[] { one.Text, two.Text }, Is.EquivalentTo(new[] { "north", "south" }));
-            Assert.That(one.Session.Id, Is.Not.EqualTo(two.Session.Id));
-        });
 
         await _cancellation.CancelAsync();
         await accept;
@@ -115,22 +87,49 @@ public class TelnetListenerTests
     }
 
     [Test]
-    public async Task StartAsync_Cancelled_StopsWithoutThrowing()
+    public async Task StartAsync_TwoClients_BothAreServed()
     {
         using var listener = new TelnetListener(EphemeralPort);
         var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
 
-        using var client = await ConnectAsync(listener);
-        await _cancellation.CancelAsync();
+        using var first = await ConnectAsync(listener);
+        using var second = await ConnectAsync(listener);
 
-        Assert.That(async () => await accept, Throws.Nothing);
+        await SendLineAsync(first, "north");
+        await SendLineAsync(second, "south");
+
+        var one = await _commands.Reader.ReadAsync(_cancellation.Token);
+        var two = await _commands.Reader.ReadAsync(_cancellation.Token);
+
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(new[] { one.Text, two.Text }, Is.EquivalentTo(new[] { "north", "south" }));
+                Assert.That(one.Session.Id, Is.Not.EqualTo(two.Session.Id));
+            }
+        );
+
+        await _cancellation.CancelAsync();
+        await accept;
     }
 
-    [Test]
-    public void Port_WhenZeroWasRequested_IsTheEphemeralPortBoundByTheConstructor()
-    {
-        using var listener = new TelnetListener(EphemeralPort);
+    [TearDown]
+    public void TearDown()
+        => _cancellation.Dispose();
 
-        Assert.That(listener.Port, Is.GreaterThan(0));
+    private async Task<TcpClient> ConnectAsync(TelnetListener listener)
+    {
+        var client = new TcpClient();
+        await client.ConnectAsync("127.0.0.1", listener.Port, _cancellation.Token);
+
+        return client;
+    }
+
+    private static async Task SendLineAsync(TcpClient client, string text)
+    {
+        var payload = Encoding.UTF8.GetBytes(text + "\r\n");
+
+        await client.GetStream().WriteAsync(payload);
+        await client.GetStream().FlushAsync();
     }
 }

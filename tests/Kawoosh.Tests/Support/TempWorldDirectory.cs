@@ -14,6 +14,14 @@ public sealed class TempWorldDirectory : IDisposable
         Directory.CreateDirectory(RootPath);
     }
 
+    public void Dispose()
+    {
+        if (Directory.Exists(RootPath))
+        {
+            Directory.Delete(RootPath, true);
+        }
+    }
+
     /// <summary>Writes a file into the directory and returns its full path.</summary>
     public string Write(string fileName, params string[] lines)
     {
@@ -21,13 +29,5 @@ public sealed class TempWorldDirectory : IDisposable
         File.WriteAllText(fullPath, string.Join("\n", lines));
 
         return fullPath;
-    }
-
-    public void Dispose()
-    {
-        if (Directory.Exists(RootPath))
-        {
-            Directory.Delete(RootPath, true);
-        }
     }
 }
