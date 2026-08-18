@@ -16,11 +16,14 @@ namespace Kawoosh.Server.Services;
 /// </summary>
 public sealed class GameLoopService : IGameLoopService, IDisposable
 {
+    private const string GreetingScreen = "greeting";
+
     private const int TickIntervalMilliseconds = 10;
     private const int WorldPulseMilliseconds = 250;
 
     private readonly ILogger _logger = Log.ForContext<GameLoopService>();
     private readonly IScreenService _screens;
+    private readonly ISessionFlowService _flow;
 
     // The channel is the thread-safe doorway; the queue behind it is touched only by the loop,
     // so the scheduling order needs no lock.
@@ -39,9 +42,10 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private long _sequence;
     private TimeSpan _lastPulseAt;
 
-    public GameLoopService(IScreenService screens)
+    public GameLoopService(IScreenService screens, ISessionFlowService flow)
     {
         _screens = screens;
+        _flow = flow;
     }
 
     /// <inheritdoc />
@@ -150,11 +154,16 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
             switch (command)
             {
                 case PlayerInputCommand input:
-                    input.Session.Send($"echo: {input.Text}");
+                    _flow.Handle(input.Session, input.Text);
+
+                    break;
+                case SessionConnectedCommand connected:
+                    ShowScreen(new ShowScreenCommand(connected.Session, GreetingScreen));
+                    _flow.Begin(connected.Session);
 
                     break;
                 case ShowScreenCommand show:
-                    show.Session.Send(_screens.Render(show.ScreenName));
+                    ShowScreen(show);
 
                     break;
                 case WorldPulseDue:
@@ -171,6 +180,21 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         {
             _logger.Error(exception, "Game loop command {CommandType} failed", command.GetType().Name);
         }
+    }
+
+    private void ShowScreen(ShowScreenCommand show)
+    {
+        if (!_screens.TryGetScreen(show.ScreenName, out var screen))
+        {
+            _logger.Warning("No screen named {ScreenName} to show", show.ScreenName);
+
+            return;
+        }
+
+        var text = _screens.Render(show.ScreenName);
+
+        // One write, so the clear and the art cannot be seen separately.
+        show.Session.Send(screen.ClearsScreen ? AnsiControl.ClearScreen + text : text);
     }
 
     private void Pulse()

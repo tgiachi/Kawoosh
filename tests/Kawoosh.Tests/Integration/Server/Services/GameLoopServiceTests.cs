@@ -6,6 +6,7 @@ using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Services;
+using Kawoosh.Server.Types;
 using Kawoosh.Tests.Support;
 
 namespace Kawoosh.Tests.Integration.Server.Services;
@@ -32,9 +33,13 @@ public class GameLoopServiceTests
         _connection = new LoopbackConnection();
         _cancellation = new CancellationTokenSource(TimeoutMilliseconds);
         _screens = new ScreenService(new VariableService());
-        _gameLoop = new GameLoopService(_screens);
+        _gameLoop = new GameLoopService(_screens, NewFlow());
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
+
+        // These tests are about the loop, not the login conversation: a session already in
+        // the world is what makes an input command reach the echo the assertions read.
+        _session.State = SessionState.Playing;
     }
 
     [TearDown]
@@ -227,7 +232,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(variables);
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens);
+        using var loop = new GameLoopService(screens, NewFlow());
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
@@ -236,6 +241,52 @@ public class GameLoopServiceTests
         var received = await ReadFromClientAsync("line one\r\nline two\r\n");
 
         Assert.That(received, Is.EqualTo("line one\r\nline two\r\n"));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_AScreenMarkedClear_IsPrecededByTheAnsiClearSequence()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("welcome.sgs", "@clear true", "---", "WELCOME");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
+
+        // Clear then home, in the same write, so the two are never seen separately.
+        const string expected = "\u001b[2J\u001b[HWELCOME\r\n";
+        var received = await ReadFromClientAsync(expected);
+
+        Assert.That(received, Is.EqualTo(expected));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_AScreenNotMarkedClear_IsSentWithNothingBeforeIt()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("inline.sgs", "@author Squid", "---", "INLINE");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "inline"));
+
+        var received = await ReadFromClientAsync("INLINE\r\n");
+
+        Assert.That(received, Is.EqualTo("INLINE\r\n"));
 
         await _cancellation.CancelAsync();
         await processing;
@@ -518,7 +569,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_OnALoopThatNeverRan_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()));
+        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
 
         Assert.That(loop.Dispose, Throws.Nothing);
     }
@@ -526,10 +577,19 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()));
+        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
         loop.Dispose();
 
         Assert.That(loop.Dispose, Throws.Nothing);
+    }
+
+    /// <summary>
+    /// A real flow over an unloaded message store: the in-world branch these tests exercise
+    /// renders no message, so nothing has to be on disk.
+    /// </summary>
+    private static SessionFlowService NewFlow()
+    {
+        return new SessionFlowService(new MessageService(new VariableService()));
     }
 
     /// <summary>Reads exactly as many bytes as <paramref name="expected" /> occupies in UTF-8.</summary>

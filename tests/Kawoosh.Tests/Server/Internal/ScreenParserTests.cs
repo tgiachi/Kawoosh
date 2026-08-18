@@ -237,4 +237,47 @@ public class ScreenParserTests
             Assert.That(screen.SourceFile, Is.EqualTo("motd.sgs"));
         });
     }
+
+    [Test]
+    public void Parse_ClearMetadata_MarksTheScreenAsFullScreen()
+    {
+        var screen = ScreenParser.Parse(
+            "greeting",
+            Sgs("@clear true", "---", "WELCOME"),
+            "greeting.sgs",
+            _problems
+        );
+
+        Assert.That(screen.ClearsScreen, Is.True);
+    }
+
+    [Test]
+    public void Parse_ClearMetadata_IsReadWithoutRegardToCase()
+    {
+        var screen = ScreenParser.Parse("g", Sgs("@Clear TRUE", "---", "x"), "g.sgs", _problems);
+
+        Assert.That(screen.ClearsScreen, Is.True);
+    }
+
+    [Test]
+    public void Parse_NoClearMetadata_LeavesTheScreenInline()
+    {
+        var screen = ScreenParser.Parse("g", Sgs("@author Squid", "---", "x"), "g.sgs", _problems);
+
+        Assert.That(screen.ClearsScreen, Is.False);
+    }
+
+    [Test]
+    public void Parse_ClearMetadataThatIsNotABoolean_LeavesTheScreenInline()
+    {
+        // Not an error: metadata stays permissive, and a screen that fails to clear is far
+        // less bad than a load that refuses to start over a typo in a display hint.
+        var screen = ScreenParser.Parse("g", Sgs("@clear maybe", "---", "x"), "g.sgs", _problems);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(screen.ClearsScreen, Is.False);
+            Assert.That(_problems, Is.Empty);
+        });
+    }
 }

@@ -12,9 +12,6 @@ namespace Kawoosh.Server.Services;
 /// </summary>
 public sealed class SessionInputRouter : ISessionInputRouter
 {
-    /// <summary>The screen every client sees on connect.</summary>
-    private const string GreetingScreen = "greeting";
-
     private readonly IGameLoopService _gameLoop;
 
     public SessionInputRouter(IGameLoopService gameLoop)
@@ -24,7 +21,7 @@ public sealed class SessionInputRouter : ISessionInputRouter
 
     public void OnSessionAccepted(TelnetSession session)
     {
-        _gameLoop.Enqueue(new ShowScreenCommand(session, GreetingScreen));
+        _gameLoop.Enqueue(new SessionConnectedCommand(session));
     }
 
     public async Task PumpAsync(ChannelReader<Command> commands, CancellationToken cancellationToken)

@@ -214,6 +214,39 @@ public class TelnetSessionTests
     }
 
     [Test]
+    public async Task SendPrompt_AMessage_ArrivesWithoutALineTerminator()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        // The cursor has to sit after the space, on the same line, or the player types their
+        // password on the row below the word asking for it.
+        session.SendPrompt("Password: ");
+        var received = await ReadFromClientAsync("Password: ".Length);
+
+        Assert.That(received, Is.EqualTo("Password: "));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
+    public async Task SendPrompt_ThenSend_KeepsBothInOrderAndOnlyTerminatesTheSecond()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        session.SendPrompt("Name: ");
+        session.Send("done");
+        var received = await ReadFromClientAsync("Name: done\r\n".Length);
+
+        Assert.That(received, Is.EqualTo("Name: done\r\n"));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
     public async Task Send_TwoMessages_ArriveInOrder()
     {
         using var session = CreateSession();

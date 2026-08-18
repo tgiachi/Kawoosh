@@ -19,6 +19,15 @@ public sealed class Screen
         SourceFile = sourceFile;
     }
 
+    /// <summary>
+    /// Whether this screen expects the terminal cleared before it. Set with "@clear true".
+    /// A value that is not a boolean leaves it false rather than failing the load: a screen
+    /// that does not clear is far less bad than a server that refuses to start over a typo
+    /// in a display hint.
+    /// </summary>
+    public bool ClearsScreen =>
+        Metadata.TryGetValue("clear", out var value) && bool.TryParse(value, out var clear) && clear;
+
     public override string ToString()
         => $"Screen({Name}, {Body.Length} chars, {Metadata.Count} metadata)";
 }

@@ -5,6 +5,7 @@ using System.Threading.Channels;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Data.World;
 using Kawoosh.Server.Networking.Internal;
+using Kawoosh.Server.Types;
 using Serilog;
 
 namespace Kawoosh.Server.Networking;
@@ -30,18 +31,24 @@ public sealed class TelnetSession : IDisposable
     private readonly ILogger _logger = Log.ForContext<TelnetSession>();
     private readonly TcpClient _client;
     private readonly ChannelWriter<Command> _commands;
-    private readonly Channel<string> _outbound;
+    private readonly Channel<OutboundMessage> _outbound;
 
     public Guid Id { get; } = Guid.NewGuid();
 
     /// <summary>The logged-in character, null until the session authenticates.</summary>
     public Character? Character { get; set; }
 
+    /// <summary>
+    /// Where this session is in the conversation. Only ever read and written on the game
+    /// loop's thread, which is why it needs no synchronisation.
+    /// </summary>
+    public SessionState State { get; set; } = SessionState.AwaitingName;
+
     public TelnetSession(TcpClient client, ChannelWriter<Command> commands)
     {
         _client = client;
         _commands = commands;
-        _outbound = Channel.CreateBounded<string>(
+        _outbound = Channel.CreateBounded<OutboundMessage>(
             new BoundedChannelOptions(OutboundCapacity)
             {
                 FullMode = BoundedChannelFullMode.DropWrite,
@@ -54,11 +61,14 @@ public sealed class TelnetSession : IDisposable
     /// Terminates every line, not just the last. A screen arrives as one Send of many lines,
     /// and a client given a bare line feed mid-message staircases the rest of it.
     /// </summary>
-    private static byte[] Encode(string message)
+    private static byte[] Encode(OutboundMessage message)
     {
-        var normalised = message.Replace(LineTerminator, "\n").Replace('\r', '\n').Replace("\n", LineTerminator);
+        var normalised = message.Text
+                                .Replace(LineTerminator, "\n")
+                                .Replace('\r', '\n')
+                                .Replace("\n", LineTerminator);
 
-        return Encoding.UTF8.GetBytes(normalised + LineTerminator);
+        return Encoding.UTF8.GetBytes(message.Terminate ? normalised + LineTerminator : normalised);
     }
 
     public void Dispose()
@@ -151,6 +161,20 @@ public sealed class TelnetSession : IDisposable
     /// stalling the game loop.
     /// </summary>
     public void Send(string message)
+    {
+        Queue(new OutboundMessage(message, true));
+    }
+
+    /// <summary>
+    /// Queues text without a line terminator, so the cursor stays on the same line. This is
+    /// what a prompt needs: "Password: " and then the player types right there.
+    /// </summary>
+    public void SendPrompt(string prompt)
+    {
+        Queue(new OutboundMessage(prompt, false));
+    }
+
+    private void Queue(OutboundMessage message)
     {
         if (!_outbound.Writer.TryWrite(message))
         {

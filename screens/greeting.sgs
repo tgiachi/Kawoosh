@@ -1,8 +1,8 @@
 @author Squid
 @description Shown to every client on connect
+@clear true
 ---
 ==============================================
               K A W O O S H
 ==============================================
 
-Welcome. There are {onlineCount} players online.
