@@ -72,6 +72,17 @@ public class ScreenManagerTests
         );
     }
 
+    [Test]
+    public void Constructor_AScreenWithAnEmptyName_Throws()
+    {
+        // TryGetScreen("") must never resolve — a session that has not switched anywhere
+        // holds an empty name, and a screen registered under one would hijack it.
+        Assert.That(
+            () => new ScreenManager([new StubScreen("")]),
+            Throws.InstanceOf<ArgumentException>()
+        );
+    }
+
     private sealed class StubScreen : IScreen
     {
         public string Name { get; }

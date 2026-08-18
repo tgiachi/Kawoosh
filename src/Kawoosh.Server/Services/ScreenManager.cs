@@ -17,6 +17,13 @@ public sealed class ScreenManager : IScreenManager
     {
         _screens = screens.ToDictionary(screen => screen.Name, StringComparer.OrdinalIgnoreCase);
 
+        // An empty name never resolves, per TryGetScreen's contract; a screen registered
+        // under one anyway would hijack every session that has not yet switched anywhere.
+        if (_screens.ContainsKey(""))
+        {
+            throw new ArgumentException("A screen cannot register under an empty name.", nameof(screens));
+        }
+
         _logger.Information("Registered {ScreenCount} screens: {ScreenNames}", _screens.Count, _screens.Keys);
     }
 

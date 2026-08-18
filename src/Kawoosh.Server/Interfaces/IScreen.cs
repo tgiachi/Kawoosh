@@ -22,6 +22,12 @@ public interface IScreen
     /// <summary>A line the player typed while this screen was current.</summary>
     void OnInput(ScreenContext context, string line);
 
-    /// <summary>Runs before the session moves to another screen.</summary>
+    /// <summary>
+    /// Runs before the session moves to another screen. Not guaranteed to be paired with a
+    /// prior <see cref="OnEnter" /> — a switch away while this screen's own art is still
+    /// playing, or a same-tick switch through and back past it, exits it without it ever
+    /// having entered. A screen must not assume OnEnter ran before its OnExit does; anything
+    /// acquired in one must be safe to release in the other even when the first never fired.
+    /// </summary>
     void OnExit(ScreenContext context);
 }

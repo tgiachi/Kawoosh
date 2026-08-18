@@ -310,18 +310,71 @@ public class ScreenSwitchingTests
     public async Task Switch_AgainBeforeItsEnterRuns_DoesNotEnterTheAbandonedScreen()
     {
         // A screen with no art has nothing to wait on, so SwitchScreen enqueues its
-        // ScreenEnteredCommand rather than running OnEnter there and then. Enqueuing a second
-        // switch before the loop gets back around to that command reproduces the race the
-        // guard in EnterScreen defends: without it, "one" would enter after the session had
-        // already moved on to "two".
-        using var loop = NewLoop(new RecordingScreen("one"), new RecordingScreen("two"));
+        // ScreenEnteredCommand rather than running OnEnter there and then. Both switches are
+        // queued from inside one hook rather than as two loop.Enqueue calls raced against the
+        // loop's own timer from the test thread: that keeps the test deterministic, since both
+        // writes land during the same dispatch and are only drained on the tick after. This
+        // reproduces the race the guard in EnterScreen defends: without it, "one" would enter
+        // after the session had already moved on to "two".
+        var start = new RecordingScreen("start");
+        start.OnInputAction = (context, _) =>
+        {
+            context.Switch("one");
+            context.Switch("two");
+        };
+
+        using var loop = NewLoop(start, new RecordingScreen("one"), new RecordingScreen("two"));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
-        loop.Enqueue(new SwitchScreenCommand(_session, "one"));
-        loop.Enqueue(new SwitchScreenCommand(_session, "two"));
+        loop.Enqueue(new SwitchScreenCommand(_session, "start"));
+        await ReadTextAsync("start:enter\r\n");
 
-        // No one:enter: the session left "one" before its own entry could run.
-        var expected = "one:exit\r\ntwo:enter\r\n";
+        loop.Enqueue(new PlayerInputCommand(_session, "go"));
+
+        // No one:enter: the session left "one" before its own entry could run. "one:exit"
+        // still shows up — switching straight through to "two" exits "one" on the way, even
+        // though "one" itself never entered; see IScreen.OnExit for why that is expected.
+        var expected = "start:input:go\r\nstart:exit\r\none:exit\r\ntwo:enter\r\n";
+        var received = await ReadTextAsync(expected);
+
+        Assert.That(received, Is.EqualTo(expected));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task Switch_TwiceToTheSameScreenInOneDispatch_EntersOnlyOnce()
+    {
+        // A guard keyed on the screen's name cannot tell a stale entry from the current one
+        // when both switches named the same screen — "one" equals "one" either way. Only the
+        // generation, incremented on every switch regardless of where it goes, can: the first
+        // switch's entry is behind by the time it is dispatched, the second is not.
+        var start = new RecordingScreen("start");
+        start.OnInputAction = (context, _) =>
+        {
+            context.Switch("one");
+            context.Switch("one");
+        };
+
+        using var loop = NewLoop(start, new RecordingScreen("one"));
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new SwitchScreenCommand(_session, "start"));
+        await ReadTextAsync("start:enter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "go"));
+
+        // A read bounded to exactly one one:enter would still pass if a second one followed
+        // right behind it — the extra bytes would simply be left unread, past the boundary
+        // this call stops at. So the real check is what comes next: a second read, bounded
+        // to the input marker alone. A stray one:enter sitting ahead of it in the stream
+        // would push that marker out of the window and turn up here as a mismatch instead.
+        await ReadTextAsync("start:input:go\r\nstart:exit\r\none:exit\r\none:enter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "still here"));
+
+        var expected = "one:input:still here\r\n";
         var received = await ReadTextAsync(expected);
 
         Assert.That(received, Is.EqualTo(expected));

@@ -51,6 +51,13 @@ public sealed class TelnetSession : IDisposable
     public string ScreenName { get; set; } = "";
 
     /// <summary>
+    /// Counts switches, so a queued entry can tell whether it still belongs to the session's
+    /// current screen rather than one it has since left. Like <see cref="ScreenName" />, it
+    /// is touched only on the game loop's thread.
+    /// </summary>
+    public long ScreenGeneration { get; set; }
+
+    /// <summary>
     /// The script this session is in the middle of, or null. Touched only on the game loop's
     /// thread, like <see cref="State" />.
     /// </summary>

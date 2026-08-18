@@ -272,15 +272,23 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
         // The screen's own name, not the one asked for, so the session records it in one case.
         command.Session.ScreenName = next.Name;
+        command.Session.ScreenGeneration++;
 
-        Play(command.Session, ArtFor(next.Name), new ScreenEnteredCommand(command.Session, next.Name));
+        Play(
+            command.Session,
+            ArtFor(next.Name),
+            new ScreenEnteredCommand(command.Session, next.Name, command.Session.ScreenGeneration)
+        );
     }
 
     private void EnterScreen(ScreenEnteredCommand command)
     {
-        // The session may have switched again while the art played; entering a screen it has
-        // already left would put it in two places at once.
-        if (!string.Equals(command.Session.ScreenName, command.ScreenName, StringComparison.OrdinalIgnoreCase))
+        // This is the reason ScreenGeneration exists: the session may have switched again
+        // since this entry was queued — possibly back to a screen of the same name — and a
+        // name alone cannot tell "still the switch that queued me" from "a later switch that
+        // happens to agree on where it went". Only the generation can, because it changes on
+        // every switch regardless of the name involved.
+        if (command.Session.ScreenGeneration != command.Generation)
         {
             return;
         }
