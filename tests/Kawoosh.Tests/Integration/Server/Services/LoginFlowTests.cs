@@ -148,6 +148,35 @@ public class LoginFlowTests
     }
 
     [Test]
+    public async Task ANameAndAPassword_SentInTheSameBurst_BothLandOnTheRightScreen()
+    {
+        // Regression: a switch only takes effect a tick after the input that caused it, so
+        // two lines enqueued together — pasted credentials, or a client's auto-login trigger
+        // — used to both reach NameScreen before the switch to PasswordScreen ran, and the
+        // second line was read as a second character name rather than a password.
+        await ArriveAtTheNamePromptAsync();
+
+        _loop.Enqueue(new PlayerInputCommand(_session, "Thorin"));
+        _loop.Enqueue(new PlayerInputCommand(_session, "secret"));
+
+        var negotiationOut = await ReadBytesAsync(SuppressEcho.Length);
+        var passwordPrompt = await ReadTextAsync(PasswordPrompt);
+        var negotiationBack = await ReadBytesAsync(RestoreEcho.Length);
+        var welcome = await ReadTextAsync("Welcome, Thorin.\r\n");
+
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(negotiationOut, Is.EqualTo(SuppressEcho));
+                Assert.That(passwordPrompt, Is.EqualTo(PasswordPrompt));
+                Assert.That(negotiationBack, Is.EqualTo(RestoreEcho));
+                Assert.That(welcome, Is.EqualTo("Welcome, Thorin.\r\n"));
+                Assert.That(_session.Character!.Name, Is.EqualTo("Thorin"));
+            }
+        );
+    }
+
+    [Test]
     public async Task ALineOnceInTheWorld_IsEchoedBack()
     {
         await ArriveInTheWorldAsync();

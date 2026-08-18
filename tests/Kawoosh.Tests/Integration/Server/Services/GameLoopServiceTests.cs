@@ -588,10 +588,6 @@ public class GameLoopServiceTests
         Assert.That(loop.Dispose, Throws.Nothing);
     }
 
-    /// <summary>
-    /// A real flow over an unloaded message store: the in-world branch these tests exercise
-    /// renders no message, so nothing has to be on disk.
-    /// </summary>
     [Test]
     public async Task ProcessAsync_AScreenWithADelay_ArrivesInPiecesOverTime()
     {

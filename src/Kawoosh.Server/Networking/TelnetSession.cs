@@ -51,6 +51,15 @@ public sealed class TelnetSession : IDisposable
     public long ScreenGeneration { get; set; }
 
     /// <summary>
+    /// Set when a switch has been queued for this session but has not yet landed, so a line
+    /// racing it reaches the screen the session is going to — once that screen has actually
+    /// entered — rather than the one it is leaving or a half-switched-to one that has not
+    /// shown its own prompt yet. Like <see cref="ScreenName" />, it is touched only on the
+    /// game loop's thread.
+    /// </summary>
+    public bool SwitchPending { get; set; }
+
+    /// <summary>
     /// The script this session is in the middle of, or null. Touched only on the game loop's
     /// thread, like <see cref="ScreenName" />.
     /// </summary>

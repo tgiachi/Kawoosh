@@ -6,6 +6,7 @@ using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Services;
 using Kawoosh.Tests.Support;
+using Serilog;
 
 namespace Kawoosh.Tests.Integration.Server.Screens;
 
@@ -17,6 +18,7 @@ namespace Kawoosh.Tests.Integration.Server.Screens;
 public class ScreenSwitchingTests
 {
     private const int TimeoutMilliseconds = 5000;
+    private const string IgnoredTemplate = "Session {SessionId} is on no screen; ignoring {Line}";
 
     private LoopbackConnection _connection = null!;
     private CancellationTokenSource _cancellation = null!;
@@ -25,6 +27,7 @@ public class ScreenSwitchingTests
     private ScreenService _art = null!;
     private TelnetSession _session = null!;
     private Task _sessionTask = null!;
+    private CapturingLogSink _logSink = null!;
 
     [SetUp]
     public void SetUp()
@@ -46,6 +49,7 @@ public class ScreenSwitchingTests
 
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
+        _logSink = new();
     }
 
     [TearDown]
@@ -387,20 +391,41 @@ public class ScreenSwitchingTests
     public async Task Input_BeforeAnySwitch_IsIgnored()
     {
         // A session with no screen has nowhere to send a line. It must not throw, and it must
-        // not stop the loop for anyone else.
-        using var loop = NewLoop(new RecordingScreen("one"));
-        var processing = loop.ProcessAsync(_cancellation.Token);
+        // not stop the loop for anyone else. Asserting on the client's bytes alone cannot
+        // distinguish that from a NullReferenceException Dispatch's catch-all swallowed —
+        // both leave the client with nothing but "one:enter\r\n" — so this also has to see
+        // the debug line that only the clean ignore path writes.
+        using var logger = new LoggerConfiguration().MinimumLevel.Debug().WriteTo.Sink(_logSink).CreateLogger();
+        var previous = Log.Logger;
+        Log.Logger = logger;
 
-        loop.Enqueue(new PlayerInputCommand(_session, "into the void"));
-        loop.Enqueue(new SwitchScreenCommand(_session, "one"));
+        try
+        {
+            // The loop binds its logger at construction, so the sink has to be live first.
+            using var loop = NewLoop(new RecordingScreen("one"));
+            var processing = loop.ProcessAsync(_cancellation.Token);
 
-        // Only the switch produced output: the earlier line went nowhere.
-        var received = await ReadTextAsync("one:enter\r\n");
+            loop.Enqueue(new PlayerInputCommand(_session, "into the void"));
+            loop.Enqueue(new SwitchScreenCommand(_session, "one"));
 
-        Assert.That(received, Is.EqualTo("one:enter\r\n"));
+            // Only the switch produced output: the earlier line went nowhere.
+            var received = await ReadTextAsync("one:enter\r\n");
 
-        await _cancellation.CancelAsync();
-        await processing;
+            Assert.Multiple(
+                () =>
+                {
+                    Assert.That(received, Is.EqualTo("one:enter\r\n"));
+                    Assert.That(_logSink.Count(IgnoredTemplate), Is.EqualTo(1));
+                }
+            );
+
+            await _cancellation.CancelAsync();
+            await processing;
+        }
+        finally
+        {
+            Log.Logger = previous;
+        }
     }
 
     private GameLoopService NewLoop(params IScreen[] screens)

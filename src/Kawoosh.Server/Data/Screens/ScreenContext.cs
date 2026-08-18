@@ -30,6 +30,7 @@ public sealed class ScreenContext
     /// <param name="screenName">Where to go. An unknown name leaves the session where it is.</param>
     public void Switch(string screenName)
     {
+        Session.SwitchPending = true;
         _gameLoop.Enqueue(new SwitchScreenCommand(Session, screenName));
     }
 }

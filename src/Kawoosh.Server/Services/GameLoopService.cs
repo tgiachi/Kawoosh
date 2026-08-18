@@ -214,6 +214,19 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void Input(TelnetSession session, string line)
     {
+        // A switch was queued for this session but has not fully landed yet. Delivering the
+        // line now could hand it to the screen the session is leaving, or to the one it is
+        // going to before that screen's own OnEnter — and therefore its prompt — has run. So
+        // it goes back on the queue instead, behind whichever step of the switch is still
+        // ahead of it; each step it waits behind is one it cannot loop past, so this
+        // terminates rather than requeuing forever.
+        if (session.SwitchPending)
+        {
+            Enqueue(new PlayerInputCommand(session, line));
+
+            return;
+        }
+
         if (!_screenManager.TryGetScreen(session.ScreenName, out var screen))
         {
             _logger.Debug("Session {SessionId} is on no screen; ignoring {Line}", session.Id, line);
@@ -229,7 +242,10 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         if (!_screenManager.TryGetScreen(command.ScreenName, out var next))
         {
             // A session on no screen is a live socket that answers nothing, so a bad switch
-            // leaves it where it was.
+            // leaves it where it was. Cleared here because a failed switch has no OnEnter
+            // coming to clear it later: nothing else is left in flight to wait on.
+            command.Session.SwitchPending = false;
+
             _logger.Error(
                 "No screen named {ScreenName}; session {SessionId} stays on {CurrentScreen}",
                 command.ScreenName,
@@ -269,6 +285,11 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         {
             return;
         }
+
+        // The switch this entry belongs to has now fully landed: the screen the session is
+        // going to is about to become current for real, so a line held back for it is safe
+        // to redeliver from here on.
+        command.Session.SwitchPending = false;
 
         if (_screenManager.TryGetScreen(command.ScreenName, out var screen))
         {
