@@ -15,6 +15,7 @@ namespace Kawoosh.Server.Provider;
 [ServiceProvider,
  Transient(typeof(ISGWFileParser), typeof(SGWFileParser)),
  Singleton(typeof(IVariableService), typeof(VariableService)),
+ Singleton(typeof(IScreenService), typeof(ScreenService)),
  Singleton(typeof(IGameLoopService), typeof(GameLoopService)),
  Singleton(typeof(ISessionInputRouter), typeof(SessionInputRouter)),
  Singleton(typeof(ITelnetListener), typeof(TelnetListener))

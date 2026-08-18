@@ -8,7 +8,11 @@ using Kawoosh.Server.Provider;
 
 await ConsoleApp.RunAsync(
     args,
-    async (CancellationToken cancellationToken, int port = ITelnetListener.DefaultPort) =>
+    async (
+        CancellationToken cancellationToken,
+        int port = ITelnetListener.DefaultPort,
+        string screenPath = "screens"
+    ) =>
     {
         Log.Logger = new LoggerConfiguration().WriteTo
                                               .Console(
@@ -29,6 +33,17 @@ await ConsoleApp.RunAsync(
         var router = services.GetService<ISessionInputRouter>();
 
         listener.Start(port);
+
+        var variables = services.GetService<IVariableService>();
+        var screens = services.GetService<IScreenService>();
+
+        // Returns 0 until there is a session registry to count: a builder that is wrong is
+        // still the seam the registry plugs into, where a missing token would be a gap.
+        variables.AddVariableBuilder("onlineCount", () => 0);
+
+        // Before the listener accepts anyone: greeting players with a blank screen is worse
+        // than not starting at all.
+        screens.Load(screenPath, ["greeting"]);
 
         var commands = Channel.CreateUnbounded<Command>();
 
