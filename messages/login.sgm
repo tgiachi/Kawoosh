@@ -1,0 +1,8 @@
+# Prompts and errors for the login flow.
+
+login.name-prompt = By what name are you known? 
+login.name-too-short = That name is too short.
+login.name-too-long = That name is too long.
+login.name-invalid = A name may only contain letters.
+login.unknown-name = No one here goes by that name. Create it? (y/n) 
+login.welcome = Welcome, {playerName}.

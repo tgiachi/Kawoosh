@@ -63,6 +63,18 @@ public class KawooshServiceProviderTests
     }
 
     [Test]
+    public void GetService_TheMessageStore_IsTheSameInstanceEveryTime()
+    {
+        using var services = new KawooshServiceProvider();
+
+        var first = services.GetService<IMessageService>();
+        var second = services.GetService<IMessageService>();
+
+        // A second store would load the directory twice and serve two versions of the truth.
+        Assert.That(first, Is.SameAs(second));
+    }
+
+    [Test]
     public void GetService_TheWorldFileParser_IsANewInstanceEachTime()
     {
         using var services = new KawooshServiceProvider();

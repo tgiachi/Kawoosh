@@ -12,7 +12,8 @@ await ConsoleApp.RunAsync(
     async (
         CancellationToken cancellationToken,
         int port = ITelnetListener.DefaultPort,
-        string screenPath = "screens"
+        string screenPath = "screens",
+        string messagePath = "messages"
     ) =>
     {
         Log.Logger = new LoggerConfiguration().WriteTo
@@ -45,6 +46,10 @@ await ConsoleApp.RunAsync(
         // Before the listener accepts anyone: greeting players with a blank screen is worse
         // than not starting at all.
         screens.Load(ContentPath.Resolve(screenPath), ["greeting"]);
+
+        var messages = services.GetService<IMessageService>();
+
+        messages.Load(ContentPath.Resolve(messagePath), ["login.name-prompt"]);
 
         var commands = Channel.CreateUnbounded<Command>();
 

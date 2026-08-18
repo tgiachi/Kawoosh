@@ -40,6 +40,9 @@
         <Content Include="..\..\screens\**\*.sgs"
                  Link="screens\%(RecursiveDir)%(Filename)%(Extension)"
                  CopyToOutputDirectory="PreserveNewest"/>
+        <Content Include="..\..\messages\**\*.sgm"
+                 Link="messages\%(RecursiveDir)%(Filename)%(Extension)"
+                 CopyToOutputDirectory="PreserveNewest"/>
     </ItemGroup>
 
 </Project>
