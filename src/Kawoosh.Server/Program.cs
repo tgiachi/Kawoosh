@@ -4,6 +4,7 @@ using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Interfaces;
+using Kawoosh.Server.Internal;
 using Kawoosh.Server.Provider;
 
 await ConsoleApp.RunAsync(
@@ -43,7 +44,7 @@ await ConsoleApp.RunAsync(
 
         // Before the listener accepts anyone: greeting players with a blank screen is worse
         // than not starting at all.
-        screens.Load(screenPath, ["greeting"]);
+        screens.Load(ContentPath.Resolve(screenPath), ["greeting"]);
 
         var commands = Channel.CreateUnbounded<Command>();
 

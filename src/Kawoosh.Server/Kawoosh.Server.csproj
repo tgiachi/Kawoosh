@@ -34,4 +34,12 @@
         <InternalsVisibleTo Include="Kawoosh.Tests"/>
     </ItemGroup>
 
+    <!-- Content lives beside the executable, so the server finds it whatever directory it
+         was launched from, and a published build is self-contained. -->
+    <ItemGroup>
+        <Content Include="..\..\screens\**\*.sgs"
+                 Link="screens\%(RecursiveDir)%(Filename)%(Extension)"
+                 CopyToOutputDirectory="PreserveNewest"/>
+    </ItemGroup>
+
 </Project>
