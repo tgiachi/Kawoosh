@@ -87,3 +87,21 @@ hits enter should not find they have also walked north.
 
 Text with no directives is never affected by this: it is a single instant step,
 sent in one write, and there is no window in which to interrupt it.
+
+## 6. Two things worth knowing
+
+**The tick is the floor.** The game loop runs on a 10 ms tick, so a delay is
+rounded up to the next one: `@typewriter 45` measures at roughly 50 ms between
+characters. Anything below 10 ms is the same as 10.
+
+**A screen cannot open with a directive.** A `.sgs` file whose first non-blank
+line starts with `@` is a metadata block — that rule belongs to the screen
+format and is what makes `@clear true` work. A screen beginning with
+
+```
+@delay 500
+```
+
+reads that line as metadata, not as a pause. Put the directive after the `---`
+that closes the metadata block, or after the first line of text. This does not
+apply to `.sgm` messages, which have no metadata block.

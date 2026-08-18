@@ -44,6 +44,12 @@ public sealed class TelnetSession : IDisposable
     /// </summary>
     public SessionState State { get; set; } = SessionState.AwaitingName;
 
+    /// <summary>
+    /// The script this session is in the middle of, or null. Touched only on the game loop's
+    /// thread, like <see cref="State" />.
+    /// </summary>
+    internal Playback? Playback { get; set; }
+
     public TelnetSession(TcpClient client, ChannelWriter<Command> commands)
     {
         _client = client;
