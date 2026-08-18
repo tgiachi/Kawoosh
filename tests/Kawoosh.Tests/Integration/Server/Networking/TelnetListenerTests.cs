@@ -150,6 +150,44 @@ public class TelnetListenerTests
         await accept;
     }
 
+    [Test]
+    public async Task StartAsync_AClientConnects_AnnouncesTheSessionBeforeItCanSendAnything()
+    {
+        using var listener = CreateListener();
+        var announced = new TaskCompletionSource<TelnetSession>();
+        listener.SessionAccepted += session => announced.TrySetResult(session);
+
+        var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
+
+        using var client = await ConnectAsync(listener);
+        var session = await announced.Task.WaitAsync(_cancellation.Token);
+
+        Assert.That(session.Id, Is.Not.EqualTo(Guid.Empty));
+
+        await _cancellation.CancelAsync();
+        await accept;
+    }
+
+    [Test]
+    public async Task StartAsync_ASubscriberThatThrows_DoesNotKillTheAcceptLoop()
+    {
+        using var listener = CreateListener();
+        listener.SessionAccepted += _ => throw new InvalidOperationException("no");
+
+        var accept = listener.StartAsync(_commands.Writer, _cancellation.Token);
+
+        using var client = await ConnectAsync(listener);
+        await SendLineAsync(client, "look");
+
+        // One bad subscriber must not stop everyone else from connecting.
+        var command = await _commands.Reader.ReadAsync(_cancellation.Token);
+
+        Assert.That(command.Text, Is.EqualTo("look"));
+
+        await _cancellation.CancelAsync();
+        await accept;
+    }
+
     [TearDown]
     public void TearDown()
         => _cancellation.Dispose();

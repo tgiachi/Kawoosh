@@ -20,6 +20,7 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private const int WorldPulseMilliseconds = 250;
 
     private readonly ILogger _logger = Log.ForContext<GameLoopService>();
+    private readonly IScreenService _screens;
 
     // The channel is the thread-safe doorway; the queue behind it is touched only by the loop,
     // so the scheduling order needs no lock.
@@ -36,6 +37,11 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private long _sequence;
+
+    public GameLoopService(IScreenService screens)
+    {
+        _screens = screens;
+    }
 
     /// <summary>
     /// World pulses run since the loop started. Monotonic, and the cheapest health signal the
@@ -147,6 +153,10 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
             {
                 case PlayerInputCommand input:
                     input.Session.Send($"echo: {input.Text}");
+
+                    break;
+                case ShowScreenCommand show:
+                    show.Session.Send(_screens.Render(show.ScreenName));
 
                     break;
                 case WorldTickCommand:

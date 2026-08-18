@@ -50,6 +50,17 @@ public sealed class TelnetSession : IDisposable
         );
     }
 
+    /// <summary>
+    /// Terminates every line, not just the last. A screen arrives as one Send of many lines,
+    /// and a client given a bare line feed mid-message staircases the rest of it.
+    /// </summary>
+    private static byte[] Encode(string message)
+    {
+        var normalised = message.Replace(LineTerminator, "\n").Replace('\r', '\n').Replace("\n", LineTerminator);
+
+        return Encoding.UTF8.GetBytes(normalised + LineTerminator);
+    }
+
     public void Dispose()
     {
         _outbound.Writer.TryComplete();
@@ -181,7 +192,7 @@ public sealed class TelnetSession : IDisposable
 
             await foreach (var message in _outbound.Reader.ReadAllAsync(cancellationToken))
             {
-                var payload = Encoding.UTF8.GetBytes(message + LineTerminator);
+                var payload = Encode(message);
 
                 await stream.WriteAsync(payload, cancellationToken);
                 await stream.FlushAsync(cancellationToken);

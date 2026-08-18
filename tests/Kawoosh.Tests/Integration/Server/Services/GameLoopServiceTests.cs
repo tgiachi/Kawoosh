@@ -21,6 +21,7 @@ public class GameLoopServiceTests
 
     private LoopbackConnection _connection = null!;
     private CancellationTokenSource _cancellation = null!;
+    private ScreenService _screens = null!;
     private GameLoopService _gameLoop = null!;
     private TelnetSession _session = null!;
     private Task _sessionTask = null!;
@@ -30,7 +31,8 @@ public class GameLoopServiceTests
     {
         _connection = new LoopbackConnection();
         _cancellation = new CancellationTokenSource(TimeoutMilliseconds);
-        _gameLoop = new GameLoopService();
+        _screens = new ScreenService(new VariableService());
+        _gameLoop = new GameLoopService(_screens);
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
     }
@@ -210,6 +212,50 @@ public class GameLoopServiceTests
         var received = await ReadFromClientAsync(expected);
 
         Assert.That(received, Is.EqualTo(expected));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_AShowScreenCommand_SendsTheRenderedScreen()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("welcome.sgs", "riga uno", "riga due");
+
+        var variables = new VariableService();
+        var screens = new ScreenService(variables);
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens);
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
+
+        // Every line terminated, because the client is a terminal and not a log file.
+        var received = await ReadFromClientAsync("riga uno\r\nriga due\r\n");
+
+        Assert.That(received, Is.EqualTo("riga uno\r\nriga due\r\n"));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_AShowScreenCommandForAnUnknownScreen_DoesNotStopTheLoop()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        _gameLoop.Enqueue(new ShowScreenCommand(_session, "does-not-exist"));
+        _gameLoop.Enqueue(new PlayerInputCommand(_session, "survivor"));
+
+        var received = await ReadFromClientAsync("echo: survivor\r\n");
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(received, Is.EqualTo("echo: survivor\r\n"));
+            Assert.That(processing.IsFaulted, Is.False);
+        });
 
         await _cancellation.CancelAsync();
         await processing;
@@ -397,7 +443,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_OnALoopThatNeverRan_DoesNotThrow()
     {
-        var loop = new GameLoopService();
+        var loop = new GameLoopService(new ScreenService(new VariableService()));
 
         Assert.That(loop.Dispose, Throws.Nothing);
     }
@@ -405,7 +451,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var loop = new GameLoopService();
+        var loop = new GameLoopService(new ScreenService(new VariableService()));
         loop.Dispose();
 
         Assert.That(loop.Dispose, Throws.Nothing);

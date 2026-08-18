@@ -85,8 +85,8 @@ public sealed class ScreenService : IScreenService
         var problems = new List<string>();
 
         var files = Directory
-            .EnumerateFiles(directoryPath, ScreenSearchPattern)
-            .OrderBy(file => file, StringComparer.Ordinal);
+                    .EnumerateFiles(directoryPath, ScreenSearchPattern)
+                    .OrderBy(file => file, StringComparer.Ordinal);
 
         foreach (var file in files)
         {

@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Interfaces;
+using Kawoosh.Server.Networking;
 
 namespace Kawoosh.Server.Services;
 
@@ -11,11 +12,19 @@ namespace Kawoosh.Server.Services;
 /// </summary>
 public sealed class SessionInputRouter : ISessionInputRouter
 {
+    /// <summary>The screen every client sees on connect.</summary>
+    private const string GreetingScreen = "greeting";
+
     private readonly IGameLoopService _gameLoop;
 
     public SessionInputRouter(IGameLoopService gameLoop)
     {
         _gameLoop = gameLoop;
+    }
+
+    public void OnSessionAccepted(TelnetSession session)
+    {
+        _gameLoop.Enqueue(new ShowScreenCommand(session, GreetingScreen));
     }
 
     public async Task PumpAsync(ChannelReader<Command> commands, CancellationToken cancellationToken)

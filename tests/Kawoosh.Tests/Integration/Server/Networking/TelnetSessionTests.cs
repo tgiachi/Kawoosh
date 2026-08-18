@@ -182,6 +182,38 @@ public class TelnetSessionTests
     }
 
     [Test]
+    public async Task Send_AMultiLineMessage_EndsEveryLineWithCarriageReturnLineFeed()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        // A screen is one Send of many lines. Terminating only the last one would leave a
+        // telnet client staircasing the rest.
+        session.Send("prima\nseconda");
+        var received = await ReadFromClientAsync("prima\r\nseconda\r\n".Length);
+
+        Assert.That(received, Is.EqualTo("prima\r\nseconda\r\n"));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
+    public async Task Send_AMessageAlreadyUsingCarriageReturns_IsNotDoubled()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        session.Send("prima\r\nseconda");
+        var received = await ReadFromClientAsync("prima\r\nseconda\r\n".Length);
+
+        Assert.That(received, Is.EqualTo("prima\r\nseconda\r\n"));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
     public async Task Send_TwoMessages_ArriveInOrder()
     {
         using var session = CreateSession();

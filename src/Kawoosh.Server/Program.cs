@@ -51,6 +51,10 @@ await ConsoleApp.RunAsync(
         // stopped on its own would otherwise leave the process up and silently dead.
         using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // The game layer learns about connections here; the listener stays ignorant of what
+        // happens to the sessions it hands over.
+        listener.SessionAccepted += router.OnSessionAccepted;
+
         var accepting = listener.StartAsync(commands.Writer, shutdown.Token);
         var routing = router.PumpAsync(commands.Reader, shutdown.Token);
         var ticking = gameLoop.ProcessAsync(shutdown.Token);

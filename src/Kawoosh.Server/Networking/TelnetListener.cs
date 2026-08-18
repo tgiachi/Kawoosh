@@ -21,6 +21,9 @@ public sealed class TelnetListener : ITelnetListener
     // parameterless constructor, so construction and binding cannot be the same step.
     private TcpListener? _listener;
 
+    /// <inheritdoc />
+    public event Action<TelnetSession>? SessionAccepted;
+
     /// <summary>
     /// The bound port: the requested port, or the ephemeral port the OS assigned when 0 was
     /// requested. Zero until <see cref="Start" /> has run. Bound there rather than in
@@ -88,6 +91,10 @@ public sealed class TelnetListener : ITelnetListener
 
         _logger.Debug("Session {SessionId} accepted", session.Id);
 
+        // Before the read loop starts, so a greeting cannot lose a race with the first line
+        // an eager client sends.
+        RaiseAccepted(session);
+
         // Deliberately not awaited: one talkative client must not stall the accept loop.
         var task = session.StartAsync(cancellationToken);
         _sessions[session.Id] = task;
@@ -107,6 +114,19 @@ public sealed class TelnetListener : ITelnetListener
             },
             TaskScheduler.Default
         );
+    }
+
+    private void RaiseAccepted(TelnetSession session)
+    {
+        // A subscriber that throws must not kill the accept loop for everyone else.
+        try
+        {
+            SessionAccepted?.Invoke(session);
+        }
+        catch (Exception exception)
+        {
+            _logger.Error(exception, "A SessionAccepted subscriber failed for session {SessionId}", session.Id);
+        }
     }
 
     /// <summary>
