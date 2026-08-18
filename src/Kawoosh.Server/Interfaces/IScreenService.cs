@@ -16,7 +16,7 @@ public interface IScreenService
     /// </summary>
     /// <param name="directoryPath">Directory holding the screens.</param>
     /// <param name="requiredScreens">Names that must be present; a missing one fails the load.</param>
-    /// <exception cref="Kawoosh.Server.Exceptions.ScreenLoadException">A file is malformed or a required screen is absent.</exception>
+    /// <exception cref="Kawoosh.Server.Exceptions.ContentLoadException">A file is malformed or a required screen is absent.</exception>
     /// <exception cref="DirectoryNotFoundException">The directory does not exist.</exception>
     void Load(string directoryPath, IReadOnlyCollection<string> requiredScreens);
 

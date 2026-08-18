@@ -100,7 +100,7 @@ public sealed class ScreenService : IScreenService
 
         if (problems.Count > 0)
         {
-            throw new ScreenLoadException(problems);
+            throw new ContentLoadException(problems);
         }
 
         return screens;

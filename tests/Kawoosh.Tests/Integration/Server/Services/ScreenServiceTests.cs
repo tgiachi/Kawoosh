@@ -82,7 +82,7 @@ public class ScreenServiceTests
     {
         _directory.Write("motd.sgs", "News");
 
-        var exception = Assert.Throws<ScreenLoadException>(
+        var exception = Assert.Throws<ContentLoadException>(
             () => _screens.Load(_directory.RootPath, ["greeting"])
         );
 
@@ -94,7 +94,7 @@ public class ScreenServiceTests
     {
         _directory.Write("greeting.sgs", "@author Squid", "junk", "---", "WELCOME");
 
-        var exception = Assert.Throws<ScreenLoadException>(
+        var exception = Assert.Throws<ContentLoadException>(
             () => _screens.Load(_directory.RootPath, NothingRequired)
         );
 
@@ -107,7 +107,7 @@ public class ScreenServiceTests
         _directory.Write("a.sgs", "@author Squid");
         _directory.Write("b.sgs", "@author Squid", "---");
 
-        var exception = Assert.Throws<ScreenLoadException>(
+        var exception = Assert.Throws<ContentLoadException>(
             () => _screens.Load(_directory.RootPath, NothingRequired)
         );
 
@@ -187,7 +187,7 @@ public class ScreenServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(_screens.Reload, Throws.InstanceOf<ScreenLoadException>());
+            Assert.That(_screens.Reload, Throws.InstanceOf<ContentLoadException>());
 
             // A typo saved on a live server must not blank every screen.
             Assert.That(_screens.Render("greeting"), Is.EqualTo("good"));
