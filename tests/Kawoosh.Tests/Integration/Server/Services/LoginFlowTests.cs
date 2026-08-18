@@ -33,13 +33,6 @@ public class LoginFlowTests
     private Task _sessionTask = null!;
     private Task _loopTask = null!;
 
-    // Bytes a socket read delivered past what a previous ReadBytesAsync call asked for.
-    // Discarding them instead of holding them here is a data loss bug, not a safe trim: the
-    // negotiation bytes and the prompt behind them can arrive in the same read, and dropping
-    // the prompt off the end of that read makes the very next assertion hang for the full
-    // cancellation window waiting for bytes that already came and were thrown away.
-    private byte[] _pending = [];
-
     [SetUp]
     public void SetUp()
     {
@@ -196,44 +189,29 @@ public class LoginFlowTests
 
     /// <summary>
     /// Reads exactly <paramref name="wanted" /> bytes. One socket read can deliver the next
-    /// message too, and an assertion about the next N bytes must not see them — so anything
-    /// past <paramref name="wanted" /> is kept in <see cref="_pending" /> for the next call
-    /// rather than read from the socket a second time, which would hang forever waiting for
-    /// bytes that already arrived.
+    /// message too, and an assertion about the next N bytes must not see them — so each read
+    /// goes straight into <paramref name="wanted" />-bounded span of the result. The OS can
+    /// never hand back more than that span can hold, so nothing arrives that has to be
+    /// discarded or held over: whatever the next message is stays in the socket's receive
+    /// buffer until the next call reads it.
     /// </summary>
     private async Task<byte[]> ReadBytesAsync(int wanted)
     {
         var result = new byte[wanted];
-        var total = Math.Min(_pending.Length, wanted);
-
-        _pending.AsSpan(0, total).CopyTo(result);
-        _pending = _pending[total..];
-
-        if (total == wanted)
-        {
-            return result;
-        }
+        var total = 0;
 
         var stream = _connection.Client.GetStream();
-        var buffer = new byte[1024];
 
         while (total < wanted)
         {
-            var read = await stream.ReadAsync(buffer, _cancellation.Token);
+            var read = await stream.ReadAsync(result.AsMemory(total), _cancellation.Token);
 
             if (read == 0)
             {
                 break;
             }
 
-            var take = Math.Min(read, wanted - total);
-            buffer.AsSpan(0, take).CopyTo(result.AsSpan(total));
-            total += take;
-
-            if (read > take)
-            {
-                _pending = [.. _pending, .. buffer[take..read]];
-            }
+            total += read;
         }
 
         return total == wanted ? result : result[..total];
