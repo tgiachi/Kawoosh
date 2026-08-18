@@ -37,17 +37,15 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private readonly Stopwatch _clock = Stopwatch.StartNew();
 
     private long _sequence;
+    private TimeSpan _lastPulseAt;
 
     public GameLoopService(IScreenService screens)
     {
         _screens = screens;
     }
 
-    /// <summary>
-    /// World pulses run since the loop started. Monotonic, and the cheapest health signal the
-    /// server has: a number that stops climbing means the loop stopped.
-    /// </summary>
-    public long WorldPulses { get; private set; }
+    /// <inheritdoc />
+    public WorldTickCommand? LastPulse { get; private set; }
 
     /// <summary>
     /// Schedules a command and returns the handle that cancels it. Returns
@@ -101,7 +99,7 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     /// </summary>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        Enqueue(new WorldTickCommand(), WorldPulseMilliseconds);
+        Enqueue(new WorldPulseDue(), WorldPulseMilliseconds);
 
         try
         {
@@ -159,7 +157,7 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
                     show.Session.Send(_screens.Render(show.ScreenName));
 
                     break;
-                case WorldTickCommand:
+                case WorldPulseDue:
                     Pulse();
 
                     break;
@@ -177,11 +175,19 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void Pulse()
     {
-        WorldPulses++;
+        // Measured now, not when this pulse was scheduled: a pulse the loop ran late reports
+        // the time that really passed, so simulation stays proportional to it.
+        var uptime = _clock.Elapsed;
+        var sincePrevious = uptime - _lastPulseAt;
+        _lastPulseAt = uptime;
 
-        // Periodic world updates — regeneration, mob movement, weather — belong here.
+        var tick = new WorldTickCommand((LastPulse?.PulseNumber ?? 0) + 1, uptime, sincePrevious);
+        LastPulse = tick;
 
-        Enqueue(new WorldTickCommand(), WorldPulseMilliseconds);
+        // Periodic world updates — regeneration, mob movement, weather — belong here, and
+        // scale by tick.SincePrevious rather than by the number of pulses.
+
+        Enqueue(new WorldPulseDue(), WorldPulseMilliseconds);
     }
 
     public void Dispose()

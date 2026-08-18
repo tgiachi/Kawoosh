@@ -293,11 +293,86 @@ public class GameLoopServiceTests
         {
             // The pulse is 250 ms and reschedules from its own handler, so ~700 ms must have
             // produced more than one. A pulse that fired once and stopped would read 1.
-            Assert.That(_gameLoop.WorldPulses, Is.GreaterThanOrEqualTo(2));
+            Assert.That(_gameLoop.LastPulse!.PulseNumber, Is.GreaterThanOrEqualTo(2));
 
             // And it must honour its own 250 ms delay rather than riding the 10 ms tick:
             // that mistake would show up here as roughly seventy pulses, not three.
-            Assert.That(_gameLoop.WorldPulses, Is.LessThanOrEqualTo(5));
+            Assert.That(_gameLoop.LastPulse!.PulseNumber, Is.LessThanOrEqualTo(5));
+        });
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public void LastPulse_BeforeTheLoopRuns_IsNull()
+    {
+        Assert.That(_gameLoop.LastPulse, Is.Null);
+    }
+
+    [Test]
+    public async Task ProcessAsync_TheWorldPulse_ReportsTheTimeThatReallyPassed()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        await Task.Delay(700, _cancellation.Token);
+        var pulse = _gameLoop.LastPulse!;
+
+        Assert.Multiple(() =>
+        {
+            // Measured at the moment the pulse fires, so it brackets the 250 ms cadence
+            // instead of repeating the nominal delay it was scheduled with.
+            Assert.That(pulse.SincePrevious.TotalMilliseconds, Is.GreaterThanOrEqualTo(200));
+            Assert.That(pulse.SincePrevious.TotalMilliseconds, Is.LessThan(400));
+
+            // Uptime is measured from the loop's clock, so it has to have reached the pulse.
+            Assert.That(pulse.Uptime, Is.GreaterThanOrEqualTo(pulse.SincePrevious));
+            Assert.That(pulse.Uptime.TotalMilliseconds, Is.GreaterThanOrEqualTo(400));
+        });
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_TheFirstPulse_MeasuresItsOwnTimeRatherThanRepeatingItsDelay()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        // Between the first pulse at ~250 ms and the second at ~500 ms.
+        await Task.Delay(350, _cancellation.Token);
+        var first = _gameLoop.LastPulse!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(first.PulseNumber, Is.EqualTo(1));
+
+            // The clock starts at zero, so on the very first pulse the time since the previous
+            // one IS the uptime — but only if both come from the same measurement taken when
+            // the pulse fired. Reporting the nominal 250 ms delay instead breaks this exactly,
+            // with no tolerance to hide in.
+            Assert.That(first.SincePrevious, Is.EqualTo(first.Uptime));
+        });
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_SuccessivePulses_NumberAndAdvanceMonotonically()
+    {
+        var processing = _gameLoop.ProcessAsync(_cancellation.Token);
+
+        await Task.Delay(400, _cancellation.Token);
+        var first = _gameLoop.LastPulse!;
+
+        await Task.Delay(400, _cancellation.Token);
+        var later = _gameLoop.LastPulse!;
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(later.PulseNumber, Is.GreaterThan(first.PulseNumber));
+            Assert.That(later.Uptime, Is.GreaterThan(first.Uptime));
         });
 
         await _cancellation.CancelAsync();

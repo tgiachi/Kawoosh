@@ -63,12 +63,9 @@ public sealed class ScreenService : IScreenService
 
     public string Render(string name)
     {
-        if (!_screens.TryGetValue(name, out var screen))
-        {
-            throw new KeyNotFoundException($"No screen named '{name}' is loaded.");
-        }
-
-        return _variables.TranslateText(screen.Body);
+        return !_screens.TryGetValue(name, out var screen)
+                   ? throw new KeyNotFoundException($"No screen named '{name}' is loaded.")
+                   : _variables.TranslateText(screen.Body);
     }
 
     private static Dictionary<string, Screen> ReadDirectory(

@@ -11,8 +11,12 @@ public interface IGameLoopService
     /// <summary>The handle returned when a command could not be scheduled.</summary>
     const long NotScheduled = 0;
 
-    /// <summary>World pulses run since the loop started; a number that stops climbing means the loop stopped.</summary>
-    long WorldPulses { get; }
+    /// <summary>
+    /// The most recent world pulse, or null before the first one fires. Its PulseNumber is
+    /// the cheapest health signal the server has: one that stops climbing means the loop
+    /// stopped.
+    /// </summary>
+    WorldTickCommand? LastPulse { get; }
 
     /// <summary>
     /// Schedules a command and returns the handle that cancels it, or
