@@ -31,13 +31,18 @@ public sealed class PasswordScreen : IScreen
 
     public void OnInput(ScreenContext context, string line)
     {
-        // The player typed their password and pressed enter; the client never showed it, so
-        // give echoing back before anything else is sent.
-        context.Session.ShowInput();
+        // Echoing comes back in OnExit instead of here: OnExit runs unconditionally on the
+        // way out of this screen no matter which exit gets the session there, so restoring it
+        // from that one place is both simpler and correct for every path, not just this one.
         context.Switch(WorldScreen.ScreenName);
     }
 
     public void OnExit(ScreenContext context)
     {
+        // Undoes OnEnter's HideInput regardless of how the screen is left — a timeout, a
+        // kick, or a forced switch all reach here without ever calling OnInput. Safe even
+        // when HideInput never ran: it queues IAC WONT ECHO, which a client that is already
+        // echoing ignores.
+        context.Session.ShowInput();
     }
 }

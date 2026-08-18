@@ -202,25 +202,25 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void ShowScreen(ShowScreenCommand show)
     {
-        if (!_screens.TryGetArt(show.ScreenName, out var art))
+        if (!_screens.TryGetArt(show.ScreenName, out _))
         {
             _logger.Warning("No screen named {ScreenName} to show", show.ScreenName);
 
             return;
         }
 
-        Play(show.Session, Compile(show.ScreenName, art.ClearsScreen), null);
+        Play(show.Session, ArtFor(show.ScreenName), null);
     }
 
     private void Input(TelnetSession session, string line)
     {
-        // A switch was queued for this session but has not fully landed yet. Delivering the
-        // line now could hand it to the screen the session is leaving, or to the one it is
-        // going to before that screen's own OnEnter — and therefore its prompt — has run. So
-        // it goes back on the queue instead, behind whichever step of the switch is still
-        // ahead of it; each step it waits behind is one it cannot loop past, so this
-        // terminates rather than requeuing forever.
-        if (session.SwitchPending)
+        // One or more switches were queued for this session but have not fully landed yet.
+        // Delivering the line now could hand it to the screen the session is leaving, or to
+        // the one it is going to before that screen's own OnEnter — and therefore its prompt
+        // — has run. So it goes back on the queue instead, behind whichever step of the
+        // switch is still ahead of it; each step it waits behind is one it cannot loop past,
+        // so this terminates rather than requeuing forever.
+        if (session.SwitchesInFlight > 0)
         {
             Enqueue(new PlayerInputCommand(session, line));
 
@@ -242,9 +242,10 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         if (!_screenManager.TryGetScreen(command.ScreenName, out var next))
         {
             // A session on no screen is a live socket that answers nothing, so a bad switch
-            // leaves it where it was. Cleared here because a failed switch has no OnEnter
-            // coming to clear it later: nothing else is left in flight to wait on.
-            command.Session.SwitchPending = false;
+            // leaves it where it was. Decremented here because a failed switch has no OnEnter
+            // coming to account for its increment later: nothing else is left in flight to
+            // wait on.
+            ResolveSwitch(command.Session);
 
             _logger.Error(
                 "No screen named {ScreenName}; session {SessionId} stays on {CurrentScreen}",
@@ -260,7 +261,27 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
         if (_screenManager.TryGetScreen(command.Session.ScreenName, out var current))
         {
-            current.OnExit(context);
+            try
+            {
+                current.OnExit(context);
+            }
+            catch (Exception exception)
+            {
+                // Dispatch's own catch would otherwise swallow this and skip everything below
+                // it, including the decrement — stranding the session with input held back
+                // forever. Logged and decremented here instead, so a throwing OnExit abandons
+                // the switch without freezing the session it belongs to.
+                _logger.Error(
+                    exception,
+                    "Screen {ScreenName} threw from OnExit; session {SessionId} stays on it",
+                    current.Name,
+                    command.Session.Id
+                );
+
+                ResolveSwitch(command.Session);
+
+                return;
+            }
         }
 
         // The screen's own name, not the one asked for, so the session records it in one case.
@@ -276,6 +297,12 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void EnterScreen(ScreenEnteredCommand command)
     {
+        // Decremented first, stale or not: this entry still holds the increment Switch made
+        // for it, and a stale entry has no other point in its life where that gets undone. If
+        // this ran after the guard below instead, a stale entry would return before reaching
+        // it and the count would never work its way back down to zero.
+        ResolveSwitch(command.Session);
+
         // This is the reason ScreenGeneration exists: the session may have switched again
         // since this entry was queued — possibly back to a screen of the same name — and a
         // name alone cannot tell "still the switch that queued me" from "a later switch that
@@ -286,14 +313,27 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
             return;
         }
 
-        // The switch this entry belongs to has now fully landed: the screen the session is
-        // going to is about to become current for real, so a line held back for it is safe
-        // to redeliver from here on.
-        command.Session.SwitchPending = false;
-
         if (_screenManager.TryGetScreen(command.ScreenName, out var screen))
         {
             screen.OnEnter(new ScreenContext(this, command.Session));
+        }
+    }
+
+    /// <summary>
+    /// Resolves one switch's share of <see cref="TelnetSession.SwitchesInFlight" />, floored
+    /// at zero. A switch queued directly rather than through <see cref="ScreenContext.Switch" />
+    /// — a session's very first, or one built straight from a command in a test — never
+    /// incremented the count in the first place. Without the floor, resolving it would still
+    /// decrement, leaving the count permanently negative; a later, real switch would then
+    /// have to climb out of that hole before the count could read positive again, so a second
+    /// switch queued alongside it could resolve first and read the count as idle while the
+    /// first was still outstanding.
+    /// </summary>
+    private static void ResolveSwitch(TelnetSession session)
+    {
+        if (session.SwitchesInFlight > 0)
+        {
+            session.SwitchesInFlight--;
         }
     }
 
@@ -312,17 +352,6 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         var text = _screens.Render(screenName);
 
         return TextScriptCompiler.Compile(art.ClearsScreen ? AnsiControl.ClearScreen + text : text);
-    }
-
-    /// <summary>
-    /// Renders a screen and compiles it. The clear goes in before compiling, so it belongs to
-    /// the first step and cannot be seen apart from the art it clears for.
-    /// </summary>
-    private TextScript Compile(string screenName, bool clearsScreen)
-    {
-        var text = _screens.Render(screenName);
-
-        return TextScriptCompiler.Compile(clearsScreen ? AnsiControl.ClearScreen + text : text);
     }
 
     /// <summary>

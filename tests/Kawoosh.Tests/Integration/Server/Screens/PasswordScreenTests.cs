@@ -76,14 +76,17 @@ public class PasswordScreenTests
     }
 
     [Test]
-    public async Task OnInput_GivesEchoingBackToTheClient()
+    public async Task OnExit_GivesEchoingBackToTheClient()
     {
-        _screen.OnInput(Context(), "hunter2");
+        // OnExit's own contract is that anything acquired in one hook must be safe to release
+        // in another even when the first never fired: a timeout, a kick, or a forced switch
+        // can all leave this screen without ever routing through OnInput. Suppression must
+        // not survive onto whatever the session lands on next.
+        _screen.OnExit(Context());
 
         var negotiation = await ReadBytesAsync(NegotiationBytes);
 
-        // IAC WONT ECHO. The client never showed the password, so echoing has to come back
-        // before anything else is sent.
+        // IAC WONT ECHO, same restore OnInput sends.
         Assert.That(negotiation, Is.EqualTo(new byte[] { 255, 252, 1 }));
     }
 

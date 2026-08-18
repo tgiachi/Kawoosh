@@ -311,6 +311,89 @@ public class ScreenSwitchingTests
     }
 
     [Test]
+    public async Task OnExit_ThatThrows_ViaContextSwitch_StillAcceptsALineAfterwards()
+    {
+        // The test above proves OnExit throwing abandons the switch, but it triggers that
+        // throw with a direct SwitchScreenCommand enqueue, which never increments
+        // SwitchesInFlight in the first place — so it cannot see a stuck count. Here both the
+        // entry into "one" and the exit that throws are driven by context.Switch from inside
+        // a hook, exactly like a real screen would, so SwitchesInFlight is genuinely
+        // incremented before the throw and has to be decremented back down for the loop to
+        // keep answering this session at all.
+        var start = new RecordingScreen("start");
+        start.OnInputAction = (context, _) => context.Switch("one");
+
+        var one = new RecordingScreen("one");
+        one.OnExitAction = _ => throw new InvalidOperationException("boom");
+        one.OnInputAction = (context, _) => context.Switch("two");
+
+        using var loop = NewLoop(start, one, new RecordingScreen("two"));
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new SwitchScreenCommand(_session, "start"));
+        await ReadTextAsync("start:enter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "go"));
+        await ReadTextAsync("start:input:go\r\nstart:exit\r\none:enter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "go again"));
+        await ReadTextAsync("one:input:go again\r\none:exit\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "still working"));
+
+        // If the throw above had left SwitchesInFlight stuck above zero, this line would be
+        // re-enqueued every tick forever rather than ever reaching a screen.
+        var received = await ReadTextAsync("one:input:still working\r\n");
+
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(received, Is.EqualTo("one:input:still working\r\n"));
+                Assert.That(_session.ScreenName, Is.EqualTo("one"));
+            }
+        );
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task Switch_ThenToAnUnknownName_StillHoldsALineUntilTheValidOneLands()
+    {
+        // Both switches dispatch in the same tick: "one" reassigns the screen and queues its
+        // entry for the tick after, then "nowhere" fails and resolves its own share of
+        // SwitchesInFlight immediately. If that resolution cleared the count rather than
+        // merely reducing it, the line queued behind both would race past the guard and
+        // reach "one" before "one:enter" — the exact half-switched-to case the count exists
+        // to prevent.
+        var start = new RecordingScreen("start");
+        start.OnInputAction = (context, _) =>
+        {
+            context.Switch("one");
+            context.Switch("nowhere");
+        };
+
+        using var loop = NewLoop(start, new RecordingScreen("one"));
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new SwitchScreenCommand(_session, "start"));
+        await ReadTextAsync("start:enter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "go"));
+        loop.Enqueue(new PlayerInputCommand(_session, "still here"));
+
+        // one:enter has to land before the input marker: had the failed switch cleared the
+        // guard on its own, "still here" would have reached "one" ahead of its own entry.
+        var expected = "start:input:go\r\nstart:exit\r\none:enter\r\none:input:still here\r\n";
+        var received = await ReadTextAsync(expected);
+
+        Assert.That(received, Is.EqualTo(expected));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
     public async Task Switch_AgainBeforeItsEnterRuns_DoesNotEnterTheAbandonedScreen()
     {
         // A screen with no art has nothing to wait on, so SwitchScreen enqueues its
