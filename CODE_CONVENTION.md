@@ -55,6 +55,7 @@ tests/Kawoosh.Tests/SGW/Services/…Tests.cs     → namespace Kawoosh.Tests.SGW
 | `Services` | Service implementations | `Services/SGWFileParser.cs` |
 | `Internal` | Implementation details outside the public API | `Internal/SGWTokenTables.cs` |
 | `Exceptions` | Exception types | `Exceptions/SGWParseException.cs` |
+| `Screens` | One `IScreen` implementation per file. A screen is a unit of conversation with one player, not a service, and holds no per-session state. | `Screens/GreetingScreen.cs` |
 
 Group by domain first, never by technical suffix.
 
