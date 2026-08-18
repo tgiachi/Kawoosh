@@ -245,4 +245,81 @@ public class VariableServiceTests
 
         Assert.That(_variables.GetVariableNames(), Is.EqualTo(new[] { "alpha", "mike", "zulu" }));
     }
+
+    [Test]
+    public void TranslateText_APerCallArgument_IsSubstituted()
+    {
+        Assert.That(
+            _variables.TranslateText("{attacker} hits {target}", ("attacker", "Thorin"), ("target", "an orc")),
+            Is.EqualTo("Thorin hits an orc")
+        );
+    }
+
+    [Test]
+    public void TranslateText_APerCallArgument_BeatsARegisteredVariable()
+    {
+        _variables.AddVariable("target", "the global one");
+
+        // A combat message must not be hijacked by whatever happens to be registered.
+        Assert.That(_variables.TranslateText("{target}", ("target", "an orc")), Is.EqualTo("an orc"));
+    }
+
+    [Test]
+    public void TranslateText_ArgumentsAndGlobals_ResolveInTheSameText()
+    {
+        _variables.AddVariable("serverName", "Kawoosh");
+
+        Assert.That(
+            _variables.TranslateText("{serverName}: {attacker} wins", ("attacker", "Thorin")),
+            Is.EqualTo("Kawoosh: Thorin wins")
+        );
+    }
+
+    [Test]
+    public void TranslateText_AnArgumentName_IsMatchedWithoutRegardToCase()
+    {
+        Assert.That(_variables.TranslateText("{Attacker}", ("attacker", "Thorin")), Is.EqualTo("Thorin"));
+    }
+
+    [Test]
+    public void TranslateText_AnArgumentValueThatLooksLikeAToken_IsNotResolvedAgain()
+    {
+        _variables.AddVariable("secret", "hidden");
+
+        // The same guarantee the global path already has: a player-supplied name cannot
+        // become a template.
+        Assert.That(_variables.TranslateText("{name}", ("name", "{secret}")), Is.EqualTo("{secret}"));
+    }
+
+    [Test]
+    public void TranslateText_AnArgumentValue_UsesTheInvariantCulture()
+    {
+        var previous = CultureInfo.CurrentCulture;
+
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("it-IT");
+
+            Assert.That(_variables.TranslateText("{damage}", ("damage", 1.5)), Is.EqualTo("1.5"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    [Test]
+    public void TranslateText_NoArguments_StillResolvesGlobals()
+    {
+        _variables.AddVariable("serverName", "Kawoosh");
+
+        // The params overload must not break the call shape every existing caller uses.
+        Assert.That(_variables.TranslateText("{serverName}"), Is.EqualTo("Kawoosh"));
+    }
+
+    [Test]
+    public void TranslateText_ANullArgumentArray_IsRejected()
+    {
+        Assert.That(() => _variables.TranslateText("{x}", null!), Throws.InstanceOf<ArgumentNullException>());
+    }
 }

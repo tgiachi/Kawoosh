@@ -60,14 +60,15 @@ public sealed partial class VariableService : IVariableService
     /// that happens to look like a token — a player's name, for instance — is text and not a
     /// template.
     /// </summary>
-    public string TranslateText(string text)
+    public string TranslateText(string text, params (string Name, object Value)[] arguments)
     {
         ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(arguments);
 
-        return TokenRegex().Replace(text, Resolve);
+        return TokenRegex().Replace(text, match => Resolve(match, arguments));
     }
 
-    private string Resolve(Match match)
+    private string Resolve(Match match, (string Name, object Value)[] arguments)
     {
         // No capture means the match was {{ or }}: emit the single brace it stands for.
         if (!match.Groups[1].Success)
@@ -76,6 +77,16 @@ public sealed partial class VariableService : IVariableService
         }
 
         var name = match.Groups[1].Value;
+
+        // A short linear scan: a message carries a handful of arguments, and this avoids a
+        // dictionary allocation per rendered line.
+        foreach (var argument in arguments)
+        {
+            if (string.Equals(argument.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return Format(argument.Value);
+            }
+        }
 
         if (!_variables.TryGetValue(name, out var builder))
         {
@@ -86,8 +97,7 @@ public sealed partial class VariableService : IVariableService
 
         try
         {
-            // Invariant culture: the same text wherever the server runs.
-            return Convert.ToString(builder(), CultureInfo.InvariantCulture) ?? string.Empty;
+            return Format(builder());
         }
         catch (Exception exception)
         {
@@ -95,6 +105,12 @@ public sealed partial class VariableService : IVariableService
 
             return string.Empty;
         }
+    }
+
+    /// <summary>Invariant culture: the same text wherever the server runs.</summary>
+    private static string Format(object value)
+    {
+        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     private void ReportUnknown(string name)

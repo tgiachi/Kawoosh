@@ -26,5 +26,9 @@ public interface IVariableService
     /// that looks like a token is text and not a template.
     /// </summary>
     /// <param name="text">Text containing zero or more tokens.</param>
-    string TranslateText(string text);
+    /// <param name="arguments">
+    /// Values for this call only, matched without regard to case. They beat anything
+    /// registered, so a message about {target} cannot be hijacked by a global of that name.
+    /// </param>
+    string TranslateText(string text, params (string Name, object Value)[] arguments);
 }
