@@ -21,7 +21,7 @@ public class VariableServiceTests
     {
         _variables.AddVariable("playerName", "Thorin");
 
-        Assert.That(_variables.TranslateText("Benvenuto {playerName}!"), Is.EqualTo("Benvenuto Thorin!"));
+        Assert.That(_variables.TranslateText("Welcome {playerName}!"), Is.EqualTo("Welcome Thorin!"));
     }
 
     [Test]
@@ -31,8 +31,8 @@ public class VariableServiceTests
         _variables.AddVariable("count", 12);
 
         Assert.That(
-            _variables.TranslateText("{name}, ci sono {count} giocatori"),
-            Is.EqualTo("Thorin, ci sono 12 giocatori")
+            _variables.TranslateText("{name}, there are {count} players"),
+            Is.EqualTo("Thorin, there are 12 players")
         );
     }
 

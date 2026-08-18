@@ -25,7 +25,7 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@author Squid", "@since 2026-08-18", "---", "BENVENUTO"),
+            Sgs("@author Squid", "@since 2026-08-18", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -34,7 +34,7 @@ public class ScreenParserTests
         {
             Assert.That(screen.Metadata["author"], Is.EqualTo("Squid"));
             Assert.That(screen.Metadata["since"], Is.EqualTo("2026-08-18"));
-            Assert.That(screen.Body, Is.EqualTo("BENVENUTO"));
+            Assert.That(screen.Body, Is.EqualTo("WELCOME"));
             Assert.That(_problems, Is.Empty);
         });
     }
@@ -44,7 +44,7 @@ public class ScreenParserTests
     {
         // The first line is a divider, not a separator: this is the case the whole
         // "metadata only when the file opens with @" rule exists to protect.
-        var body = Sgs("---------------", "  BENVENUTO", "---------------");
+        var body = Sgs("---------------", "  WELCOME", "---------------");
         var screen = ScreenParser.Parse("greeting", body, "greeting.sgs", _problems);
 
         Assert.Multiple(() =>
@@ -60,12 +60,12 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@author Squid", "---", "---------------", "BENVENUTO", "---------------"),
+            Sgs("@author Squid", "---", "---------------", "WELCOME", "---------------"),
             "greeting.sgs",
             _problems
         );
 
-        Assert.That(screen.Body, Is.EqualTo(Sgs("---------------", "BENVENUTO", "---------------")));
+        Assert.That(screen.Body, Is.EqualTo(Sgs("---------------", "WELCOME", "---------------")));
     }
 
     [Test]
@@ -84,7 +84,7 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@author Squid", "", "@since 2026", "---", "BENVENUTO"),
+            Sgs("@author Squid", "", "@since 2026", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -101,7 +101,7 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@Author    Squid   ", "---", "BENVENUTO"),
+            Sgs("@Author    Squid   ", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -116,7 +116,7 @@ public class ScreenParserTests
         // editing code every time a writer wants a new note.
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@mood cheerful", "---", "BENVENUTO"),
+            Sgs("@mood cheerful", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -133,7 +133,7 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            Sgs("@author First", "@author Second", "---", "BENVENUTO"),
+            Sgs("@author First", "@author Second", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -163,7 +163,7 @@ public class ScreenParserTests
     {
         ScreenParser.Parse(
             "greeting",
-            Sgs("@author Squid", "questa non e una direttiva", "---", "BENVENUTO"),
+            Sgs("@author Squid", "this is not a directive", "---", "WELCOME"),
             "greeting.sgs",
             _problems
         );
@@ -188,12 +188,12 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            "@author Squid\r\n---\r\nprima\r\nseconda\r\n",
+            "@author Squid\r\n---\r\nfirst\r\nsecond\r\n",
             "greeting.sgs",
             _problems
         );
 
-        Assert.That(screen.Body, Is.EqualTo("prima\nseconda"));
+        Assert.That(screen.Body, Is.EqualTo("first\nsecond"));
     }
 
     [Test]
@@ -201,7 +201,7 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            "﻿@author Squid\n---\nBENVENUTO",
+            "﻿@author Squid\n---\nWELCOME",
             "greeting.sgs",
             _problems
         );
@@ -218,12 +218,12 @@ public class ScreenParserTests
     {
         var screen = ScreenParser.Parse(
             "greeting",
-            "@author Squid\n---\nprima\n\nseconda\n",
+            "@author Squid\n---\nfirst\n\nsecond\n",
             "greeting.sgs",
             _problems
         );
 
-        Assert.That(screen.Body, Is.EqualTo("prima\n\nseconda"));
+        Assert.That(screen.Body, Is.EqualTo("first\n\nsecond"));
     }
 
     [Test]

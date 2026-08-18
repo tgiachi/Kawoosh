@@ -32,15 +32,15 @@ public class ScreenServiceTests
     [Test]
     public void Load_ADirectoryOfScreens_ReadsEachOneUnderItsFileName()
     {
-        _directory.Write("greeting.sgs", "@author Squid", "---", "BENVENUTO");
-        _directory.Write("motd.sgs", "Notizie del giorno");
+        _directory.Write("greeting.sgs", "@author Squid", "---", "WELCOME");
+        _directory.Write("motd.sgs", "News of the day");
 
         _screens.Load(_directory.RootPath, NothingRequired);
 
         Assert.Multiple(() =>
         {
             Assert.That(_screens.ScreenNames, Is.EquivalentTo(new[] { "greeting", "motd" }));
-            Assert.That(_screens.Render("greeting"), Is.EqualTo("BENVENUTO"));
+            Assert.That(_screens.Render("greeting"), Is.EqualTo("WELCOME"));
         });
     }
 
@@ -49,28 +49,28 @@ public class ScreenServiceTests
     {
         // No @ block means no separator: the --- is art. This is the rule the format exists
         // for, and it is easy to break from the service side by "helpfully" stripping it.
-        _directory.Write("greeting.sgs", "---------------", "BENVENUTO", "---------------");
+        _directory.Write("greeting.sgs", "---------------", "WELCOME", "---------------");
 
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        Assert.That(_screens.Render("greeting"), Is.EqualTo("---------------\nBENVENUTO\n---------------"));
+        Assert.That(_screens.Render("greeting"), Is.EqualTo("---------------\nWELCOME\n---------------"));
     }
 
     [Test]
     public void Load_AFileNameWithMixedCase_IsKeyedInLowercase()
     {
-        _directory.Write("Greeting.SGS", "BENVENUTO");
+        _directory.Write("Greeting.SGS", "WELCOME");
 
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        Assert.That(_screens.Render("greeting"), Is.EqualTo("BENVENUTO"));
+        Assert.That(_screens.Render("greeting"), Is.EqualTo("WELCOME"));
     }
 
     [Test]
     public void Load_FilesWithOtherExtensions_AreIgnored()
     {
-        _directory.Write("greeting.sgs", "BENVENUTO");
-        _directory.Write("notes.txt", "non e una schermata");
+        _directory.Write("greeting.sgs", "WELCOME");
+        _directory.Write("notes.txt", "not a screen at all");
 
         _screens.Load(_directory.RootPath, NothingRequired);
 
@@ -80,7 +80,7 @@ public class ScreenServiceTests
     [Test]
     public void Load_AMissingRequiredScreen_Throws()
     {
-        _directory.Write("motd.sgs", "Notizie");
+        _directory.Write("motd.sgs", "News");
 
         var exception = Assert.Throws<ScreenLoadException>(
             () => _screens.Load(_directory.RootPath, ["greeting"])
@@ -92,7 +92,7 @@ public class ScreenServiceTests
     [Test]
     public void Load_AMalformedScreen_ThrowsWithTheFileAndLine()
     {
-        _directory.Write("greeting.sgs", "@author Squid", "spazzatura", "---", "BENVENUTO");
+        _directory.Write("greeting.sgs", "@author Squid", "junk", "---", "WELCOME");
 
         var exception = Assert.Throws<ScreenLoadException>(
             () => _screens.Load(_directory.RootPath, NothingRequired)
@@ -125,7 +125,7 @@ public class ScreenServiceTests
     [Test]
     public void Render_AScreenWithVariables_SubstitutesThemAtRenderTime()
     {
-        _directory.Write("greeting.sgs", "Ciao {playerName}");
+        _directory.Write("greeting.sgs", "Hello {playerName}");
         _screens.Load(_directory.RootPath, NothingRequired);
 
         _variables.AddVariable("playerName", "Thorin");
@@ -137,8 +137,8 @@ public class ScreenServiceTests
         // Substituting at load would have frozen the first player's name for everyone.
         Assert.Multiple(() =>
         {
-            Assert.That(first, Is.EqualTo("Ciao Thorin"));
-            Assert.That(second, Is.EqualTo("Ciao Bilbo"));
+            Assert.That(first, Is.EqualTo("Hello Thorin"));
+            Assert.That(second, Is.EqualTo("Hello Bilbo"));
         });
     }
 
@@ -153,7 +153,7 @@ public class ScreenServiceTests
     [Test]
     public void TryGetScreen_AKnownScreen_ExposesItsMetadata()
     {
-        _directory.Write("greeting.sgs", "@author Squid", "---", "BENVENUTO");
+        _directory.Write("greeting.sgs", "@author Squid", "---", "WELCOME");
         _screens.Load(_directory.RootPath, NothingRequired);
 
         var found = _screens.TryGetScreen("greeting", out var screen);
@@ -168,29 +168,29 @@ public class ScreenServiceTests
     [Test]
     public void Reload_AfterAnEdit_ServesTheNewText()
     {
-        _directory.Write("greeting.sgs", "vecchio");
+        _directory.Write("greeting.sgs", "old");
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        _directory.Write("greeting.sgs", "nuovo");
+        _directory.Write("greeting.sgs", "new");
         _screens.Reload();
 
-        Assert.That(_screens.Render("greeting"), Is.EqualTo("nuovo"));
+        Assert.That(_screens.Render("greeting"), Is.EqualTo("new"));
     }
 
     [Test]
     public void Reload_WhenTheNewFilesAreBroken_KeepsTheOnesAlreadyServing()
     {
-        _directory.Write("greeting.sgs", "buono");
+        _directory.Write("greeting.sgs", "good");
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        _directory.Write("greeting.sgs", "@author Squid", "spazzatura", "---", "rotto");
+        _directory.Write("greeting.sgs", "@author Squid", "junk", "---", "broken");
 
         Assert.Multiple(() =>
         {
             Assert.That(_screens.Reload, Throws.InstanceOf<ScreenLoadException>());
 
             // A typo saved on a live server must not blank every screen.
-            Assert.That(_screens.Render("greeting"), Is.EqualTo("buono"));
+            Assert.That(_screens.Render("greeting"), Is.EqualTo("good"));
         });
     }
 

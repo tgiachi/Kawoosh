@@ -29,7 +29,7 @@ no escapes, no line-start significance. What the file holds is what the player s
               K A W O O S H
 ==============================================
 
-Ci sono {onlineCount} giocatori collegati.
+There are {onlineCount} players online.
 ```
 
 ## Metadata
@@ -41,7 +41,7 @@ That rule is not cosmetic. `---` is the most common divider in MUD art:
 
 ```
 ------------------------------
-       BENVENUTO IN KAWOOSH
+          WELCOME TO KAWOOSH
 ------------------------------
 ```
 

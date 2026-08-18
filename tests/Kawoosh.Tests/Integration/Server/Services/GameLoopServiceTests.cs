@@ -221,7 +221,7 @@ public class GameLoopServiceTests
     public async Task ProcessAsync_AShowScreenCommand_SendsTheRenderedScreen()
     {
         using var directory = new TempScreenDirectory();
-        directory.Write("welcome.sgs", "riga uno", "riga due");
+        directory.Write("welcome.sgs", "line one", "line two");
 
         var variables = new VariableService();
         var screens = new ScreenService(variables);
@@ -233,9 +233,9 @@ public class GameLoopServiceTests
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
 
         // Every line terminated, because the client is a terminal and not a log file.
-        var received = await ReadFromClientAsync("riga uno\r\nriga due\r\n");
+        var received = await ReadFromClientAsync("line one\r\nline two\r\n");
 
-        Assert.That(received, Is.EqualTo("riga uno\r\nriga due\r\n"));
+        Assert.That(received, Is.EqualTo("line one\r\nline two\r\n"));
 
         await _cancellation.CancelAsync();
         await processing;

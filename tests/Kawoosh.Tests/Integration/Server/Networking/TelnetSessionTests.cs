@@ -167,9 +167,9 @@ public class TelnetSessionTests
         using var session = CreateSession();
         var start = session.StartAsync(_cancellation.Token);
 
-        const string expected = "Benvenuto à Kawoosh\r\n";
+        const string expected = "Welcome to the café\r\n";
 
-        session.Send("Benvenuto à Kawoosh");
+        session.Send("Welcome to the café");
 
         // The accented character is two bytes, so the read has to be told how many to wait
         // for rather than settling for whatever the first ReadAsync happens to hand back.
@@ -189,10 +189,10 @@ public class TelnetSessionTests
 
         // A screen is one Send of many lines. Terminating only the last one would leave a
         // telnet client staircasing the rest.
-        session.Send("prima\nseconda");
-        var received = await ReadFromClientAsync("prima\r\nseconda\r\n".Length);
+        session.Send("first\nsecond");
+        var received = await ReadFromClientAsync("first\r\nsecond\r\n".Length);
 
-        Assert.That(received, Is.EqualTo("prima\r\nseconda\r\n"));
+        Assert.That(received, Is.EqualTo("first\r\nsecond\r\n"));
 
         await _cancellation.CancelAsync();
         await start;
@@ -204,10 +204,10 @@ public class TelnetSessionTests
         using var session = CreateSession();
         var start = session.StartAsync(_cancellation.Token);
 
-        session.Send("prima\r\nseconda");
-        var received = await ReadFromClientAsync("prima\r\nseconda\r\n".Length);
+        session.Send("first\r\nsecond");
+        var received = await ReadFromClientAsync("first\r\nsecond\r\n".Length);
 
-        Assert.That(received, Is.EqualTo("prima\r\nseconda\r\n"));
+        Assert.That(received, Is.EqualTo("first\r\nsecond\r\n"));
 
         await _cancellation.CancelAsync();
         await start;
