@@ -11,13 +11,6 @@ internal static class TelnetLineReader
 {
     private const byte LineFeed = 10;
     private const byte CarriageReturn = 13;
-    private const byte SubnegotiationEnd = 240;
-    private const byte Subnegotiation = 250;
-    private const byte Will = 251;
-    private const byte Wont = 252;
-    private const byte Do = 253;
-    private const byte Dont = 254;
-    private const byte InterpretAsCommand = 255;
 
     private const int PlainCommandLength = 2;
     private const int OptionCommandLength = 3;
@@ -37,7 +30,7 @@ internal static class TelnetLineReader
 
         while (index < input.Length)
         {
-            if (input[index] != InterpretAsCommand)
+            if (input[index] != TelnetProtocol.InterpretAsCommand)
             {
                 output[length] = input[index];
                 length++;
@@ -53,9 +46,9 @@ internal static class TelnetLineReader
 
             var command = input[index + 1];
 
-            if (command == InterpretAsCommand)
+            if (command == TelnetProtocol.InterpretAsCommand)
             {
-                output[length] = InterpretAsCommand;
+                output[length] = TelnetProtocol.InterpretAsCommand;
                 length++;
                 index += PlainCommandLength;
 
@@ -98,12 +91,12 @@ internal static class TelnetLineReader
     /// </summary>
     private static int SkipCommand(byte[] input, int index, byte command)
     {
-        if (command == Subnegotiation)
+        if (command == TelnetProtocol.Subnegotiation)
         {
             return SkipSubnegotiation(input, index + PlainCommandLength);
         }
 
-        if (command is Will or Wont or Do or Dont)
+        if (command is TelnetProtocol.Will or TelnetProtocol.Wont or TelnetProtocol.Do or TelnetProtocol.Dont)
         {
             return index + OptionCommandLength;
         }
@@ -119,7 +112,7 @@ internal static class TelnetLineReader
     {
         while (index + 1 < input.Length)
         {
-            if (input[index] == InterpretAsCommand && input[index + 1] == SubnegotiationEnd)
+            if (input[index] == TelnetProtocol.InterpretAsCommand && input[index + 1] == TelnetProtocol.SubnegotiationEnd)
             {
                 return index + PlainCommandLength;
             }

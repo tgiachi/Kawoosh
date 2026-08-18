@@ -587,6 +587,171 @@ public class GameLoopServiceTests
     /// A real flow over an unloaded message store: the in-world branch these tests exercise
     /// renders no message, so nothing has to be on disk.
     /// </summary>
+    [Test]
+    public async Task ProcessAsync_AScreenWithADelay_ArrivesInPiecesOverTime()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("intro.sgs", "before", "@delay 300", "after");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+        var elapsed = Stopwatch.StartNew();
+
+        loop.Enqueue(new ShowScreenCommand(_session, "intro"));
+
+        await ReadFromClientAsync("before\r\n");
+        var firstAt = elapsed.ElapsedMilliseconds;
+
+        await ReadFromClientAsync("after\r\n");
+        var secondAt = elapsed.ElapsedMilliseconds;
+
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(firstAt, Is.LessThan(200));
+                Assert.That(secondAt, Is.GreaterThanOrEqualTo(280));
+            }
+        );
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_ALineTypedDuringAPlayback_ShowsTheRestAtOnceAndIsNotACommand()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("intro.sgs", "before", "@delay 3000", "after");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "intro"));
+        await ReadFromClientAsync("before\r\n");
+
+        var elapsed = Stopwatch.StartNew();
+        loop.Enqueue(new PlayerInputCommand(_session, "skip"));
+
+        var received = await ReadFromClientAsync("after\r\n");
+        elapsed.Stop();
+
+        Assert.Multiple(
+            () =>
+            {
+                // The remaining three seconds are not waited out...
+                Assert.That(elapsed.ElapsedMilliseconds, Is.LessThan(1000));
+                Assert.That(received, Is.EqualTo("after\r\n"));
+
+                // ...and the line that skipped is not echoed back as a command.
+                Assert.That(_session.Playback, Is.Null);
+            }
+        );
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_ALineAfterAPlaybackHasFinished_IsACommandAgain()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("intro.sgs", "before", "@delay 50", "after");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "intro"));
+        await ReadFromClientAsync("before\r\nafter\r\n");
+
+        loop.Enqueue(new PlayerInputCommand(_session, "look"));
+        var received = await ReadFromClientAsync("echo: look\r\n");
+
+        Assert.That(received, Is.EqualTo("echo: look\r\n"));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_ASecondScreenWhileOneIsPlaying_ReplacesItInsteadOfInterleaving()
+    {
+        using var directory = new TempScreenDirectory();
+        directory.Write("slow.sgs", "SLOW", "@delay 3000", "NEVER");
+        directory.Write("quick.sgs", "QUICK");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new ShowScreenCommand(_session, "slow"));
+        await ReadFromClientAsync("SLOW\r\n");
+
+        loop.Enqueue(new ShowScreenCommand(_session, "quick"));
+        var received = await ReadFromClientAsync("QUICK\r\n");
+
+        Assert.Multiple(
+            () =>
+            {
+                // Not "NEVER": the abandoned script must not go on writing over the new one.
+                Assert.That(received, Is.EqualTo("QUICK\r\n"));
+                Assert.That(_session.Playback, Is.Null);
+            }
+        );
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    [Test]
+    public async Task ProcessAsync_AConnectingSession_GetsTheGreetingBeforeTheFirstPrompt()
+    {
+        // The continuation exists for exactly this: a timed greeting must finish before the
+        // flow's prompt, or the player is asked their name over the top of the banner.
+        using var directory = new TempScreenDirectory();
+        directory.Write("greeting.sgs", "BANNER", "@delay 200", "MORE");
+
+        var screens = new ScreenService(new VariableService());
+        screens.Load(directory.RootPath, []);
+
+        using var loop = new GameLoopService(screens, NewPromptingFlow());
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new SessionConnectedCommand(_session));
+
+        var received = await ReadFromClientAsync("BANNER\r\nMORE\r\nPROMPT");
+
+        Assert.That(received, Is.EqualTo("BANNER\r\nMORE\r\nPROMPT"));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
+    /// <summary>
+    /// A flow whose first prompt is the literal "PROMPT" and carries no terminator, so a test
+    /// can assert where it lands relative to the screen that precedes it.
+    /// </summary>
+    private static SessionFlowService NewPromptingFlow()
+    {
+        using var directory = new TempMessageDirectory();
+        directory.Write("login.sgm", "login.name-prompt = PROMPT");
+
+        var messages = new MessageService(new VariableService());
+        messages.Load(directory.RootPath, []);
+
+        return new SessionFlowService(messages);
+    }
+
     private static SessionFlowService NewFlow()
     {
         return new SessionFlowService(new MessageService(new VariableService()));

@@ -4,7 +4,10 @@ using System.Threading.Channels;
 using Serilog;
 using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Interfaces;
+using Kawoosh.Server.Data.Text;
 using Kawoosh.Server.Internal;
+using Kawoosh.Server.Networking;
+using Kawoosh.Server.Networking.Internal;
 
 namespace Kawoosh.Server.Services;
 
@@ -153,13 +156,24 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         {
             switch (command)
             {
+                case PlayerInputCommand input when input.Session.Playback is { } playback:
+                    Skip(input.Session, playback);
+
+                    break;
                 case PlayerInputCommand input:
                     _flow.Handle(input.Session, input.Text);
 
                     break;
+                case PlayScriptCommand play:
+                    Advance(play);
+
+                    break;
+                case BeginSessionFlowCommand begin:
+                    _flow.Begin(begin.Session);
+
+                    break;
                 case SessionConnectedCommand connected:
-                    ShowScreen(new ShowScreenCommand(connected.Session, GreetingScreen));
-                    _flow.Begin(connected.Session);
+                    ShowGreeting(connected.Session);
 
                     break;
                 case ShowScreenCommand show:
@@ -191,10 +205,138 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
             return;
         }
 
-        var text = _screens.Render(show.ScreenName);
+        Play(show.Session, Compile(show.ScreenName, screen.ClearsScreen), null);
+    }
 
-        // One write, so the clear and the art cannot be seen separately.
-        show.Session.Send(screen.ClearsScreen ? AnsiControl.ClearScreen + text : text);
+    private void ShowGreeting(TelnetSession session)
+    {
+        if (!_screens.TryGetScreen(GreetingScreen, out var screen))
+        {
+            // No banner is survivable; a session left with no prompt is not.
+            _logger.Warning("No screen named {ScreenName} to show", GreetingScreen);
+            _flow.Begin(session);
+
+            return;
+        }
+
+        Play(session, Compile(GreetingScreen, screen.ClearsScreen), new BeginSessionFlowCommand(session));
+    }
+
+    /// <summary>
+    /// Renders a screen and compiles it. The clear goes in before compiling, so it belongs to
+    /// the first step and cannot be seen apart from the art it clears for.
+    /// </summary>
+    private TextScript Compile(string screenName, bool clearsScreen)
+    {
+        var text = _screens.Render(screenName);
+
+        return TextScriptCompiler.Compile(clearsScreen ? AnsiControl.ClearScreen + text : text);
+    }
+
+    /// <summary>
+    /// Starts a script. An instant one is sent here and now, which keeps the ordering a
+    /// caller has today; anything timed goes through the scheduler.
+    /// </summary>
+    private void Play(TelnetSession session, TextScript script, GameLoopCommand? then)
+    {
+        // Whatever this session was showing is abandoned. Without this its pending step would
+        // find the new playback on the session and write its own position into it.
+        if (session.Playback is { } previous)
+        {
+            Cancel(previous.Handle);
+            session.Playback = null;
+        }
+
+        if (script.Steps.Count == 0)
+        {
+            RunContinuation(then);
+
+            return;
+        }
+
+        if (script.IsInstant)
+        {
+            SendStep(session, script.Steps[0]);
+            RunContinuation(then);
+
+            return;
+        }
+
+        var playback = new Playback(script, then);
+        session.Playback = playback;
+
+        playback.Handle = Enqueue(
+            new PlayScriptCommand(session, script, 0, then),
+            script.Steps[0].DelayMilliseconds
+        );
+    }
+
+    private void Advance(PlayScriptCommand play)
+    {
+        // A playback the session no longer owns was skipped or replaced: its remaining text
+        // has already been dealt with, and sending it again would double it.
+        if (play.Session.Playback is not { } playback
+            || !ReferenceEquals(playback.Script, play.Script)
+            || playback.Handle == IGameLoopService.NotScheduled)
+        {
+            return;
+        }
+
+        SendStep(play.Session, play.Script.Steps[play.Index]);
+
+        var next = play.Index + 1;
+
+        if (next >= play.Script.Steps.Count)
+        {
+            play.Session.Playback = null;
+            RunContinuation(play.Then);
+
+            return;
+        }
+
+        playback.NextIndex = next;
+        playback.Handle = Enqueue(
+            new PlayScriptCommand(play.Session, play.Script, next, play.Then),
+            play.Script.Steps[next].DelayMilliseconds
+        );
+    }
+
+    /// <summary>
+    /// Shows everything a playback has left, at once, and runs its continuation. The line
+    /// that caused this is not a command: someone pressing enter to get past an intro did not
+    /// mean to type anything.
+    /// </summary>
+    private void Skip(TelnetSession session, Playback playback)
+    {
+        Cancel(playback.Handle);
+        session.Playback = null;
+
+        for (var index = playback.NextIndex; index < playback.Script.Steps.Count; index++)
+        {
+            SendStep(session, playback.Script.Steps[index]);
+        }
+
+        RunContinuation(playback.Then);
+    }
+
+    private void RunContinuation(GameLoopCommand? then)
+    {
+        if (then is not null)
+        {
+            Enqueue(then);
+        }
+    }
+
+    private static void SendStep(TelnetSession session, TextStep step)
+    {
+        if (step.Terminate)
+        {
+            session.Send(step.Text);
+
+            return;
+        }
+
+        session.SendPrompt(step.Text);
     }
 
     private void Pulse()

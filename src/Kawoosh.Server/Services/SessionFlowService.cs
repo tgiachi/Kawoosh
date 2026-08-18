@@ -67,6 +67,10 @@ public sealed class SessionFlowService : ISessionFlowService
 
         session.Character = new Character { Name = name };
         session.State = SessionState.AwaitingPassword;
+
+        // Before the prompt, or the first characters of the password are already on screen by
+        // the time the client stops echoing.
+        session.HideInput();
         session.SendPrompt(_messages.Render("login.password-prompt"));
     }
 
@@ -88,6 +92,10 @@ public sealed class SessionFlowService : ISessionFlowService
 
     private void HandlePassword(TelnetSession session)
     {
+        // The player typed their password and pressed enter; the client never showed it, so
+        // give echoing back before anything else is sent.
+        session.ShowInput();
+
         // Whatever was typed is accepted; see the remarks on this class.
         var name = session.Character?.Name ?? string.Empty;
 
