@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Data.Network;
+using Kawoosh.Server.Interfaces;
 
 namespace Kawoosh.Server.Services;
 
@@ -8,11 +9,11 @@ namespace Kawoosh.Server.Services;
 /// Carries lines from the shared network channel onto the game loop's queue. This is the seam
 /// that keeps the telnet layer ignorant of game types: it is the only place that knows both.
 /// </summary>
-public class SessionInputRouter
+public sealed class SessionInputRouter : ISessionInputRouter
 {
-    private readonly GameLoopService _gameLoop;
+    private readonly IGameLoopService _gameLoop;
 
-    public SessionInputRouter(GameLoopService gameLoop)
+    public SessionInputRouter(IGameLoopService gameLoop)
     {
         _gameLoop = gameLoop;
     }

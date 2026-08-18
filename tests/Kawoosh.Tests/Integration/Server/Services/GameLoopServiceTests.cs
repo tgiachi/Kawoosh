@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.Channels;
 using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Data.Network;
+using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Services;
 using Kawoosh.Tests.Support;
@@ -285,7 +286,7 @@ public class GameLoopServiceTests
 
         Assert.That(
             _gameLoop.Enqueue(new PlayerInputCommand(_session, "look")),
-            Is.EqualTo(GameLoopService.NotScheduled)
+            Is.EqualTo(IGameLoopService.NotScheduled)
         );
     }
 
@@ -351,7 +352,7 @@ public class GameLoopServiceTests
         Assert.Multiple(() =>
         {
             Assert.That(_gameLoop.Cancel(999_999), Is.False);
-            Assert.That(_gameLoop.Cancel(GameLoopService.NotScheduled), Is.False);
+            Assert.That(_gameLoop.Cancel(IGameLoopService.NotScheduled), Is.False);
         });
     }
 

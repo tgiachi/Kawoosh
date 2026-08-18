@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Threading.Channels;
 using Serilog;
 using Kawoosh.Server.Data.Network;
+using Kawoosh.Server.Interfaces;
 
 namespace Kawoosh.Server.Networking;
 
@@ -11,10 +12,8 @@ namespace Kawoosh.Server.Networking;
 /// Accepts telnet clients and gives each one a <see cref="TelnetSession" />. Session tasks are
 /// tracked so shutdown can await them, but the accept loop never waits on a session.
 /// </summary>
-public sealed class TelnetListener : IDisposable
+public sealed class TelnetListener : ITelnetListener
 {
-    public const int DefaultPort = 4000;
-
     private readonly ILogger _logger = Log.ForContext<TelnetListener>();
     private readonly ConcurrentDictionary<Guid, Task> _sessions = new();
 
@@ -32,7 +31,7 @@ public sealed class TelnetListener : IDisposable
 
     /// <summary>Binds the socket. Must run before <see cref="StartAsync" />.</summary>
     /// <exception cref="InvalidOperationException">The listener is already bound.</exception>
-    public void Start(int port = DefaultPort)
+    public void Start(int port = ITelnetListener.DefaultPort)
     {
         if (_listener is not null)
         {

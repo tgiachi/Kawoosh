@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Serilog;
 using Kawoosh.Server.Data.Commands;
+using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Internal;
 
 namespace Kawoosh.Server.Services;
@@ -13,11 +14,8 @@ namespace Kawoosh.Server.Services;
 /// for no delay runs at the next tick instead of waiting for the world pulse.
 /// World state is only ever touched from here, one command at a time.
 /// </summary>
-public sealed class GameLoopService : IDisposable
+public sealed class GameLoopService : IGameLoopService, IDisposable
 {
-    /// <summary>The handle returned when a command could not be scheduled.</summary>
-    public const long NotScheduled = 0;
-
     private const int TickIntervalMilliseconds = 10;
     private const int WorldPulseMilliseconds = 250;
 
@@ -69,7 +67,7 @@ public sealed class GameLoopService : IDisposable
         _live.TryRemove(entry.Handle, out _);
         _logger.Warning("Game loop has stopped, dropped {CommandType}", command.GetType().Name);
 
-        return NotScheduled;
+        return IGameLoopService.NotScheduled;
     }
 
     /// <summary>

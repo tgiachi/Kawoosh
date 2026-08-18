@@ -2,6 +2,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
 using Kawoosh.Server.Data.Network;
+using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
 
 namespace Kawoosh.Tests.Integration.Server.Networking;
@@ -19,7 +20,7 @@ public class TelnetListenerTests
 
     [Test]
     public void DefaultPort_IsFourThousand()
-        => Assert.That(TelnetListener.DefaultPort, Is.EqualTo(4000));
+        => Assert.That(ITelnetListener.DefaultPort, Is.EqualTo(4000));
 
     [Test]
     public void Port_WhenZeroWasRequested_IsTheEphemeralPortBoundByStart()
