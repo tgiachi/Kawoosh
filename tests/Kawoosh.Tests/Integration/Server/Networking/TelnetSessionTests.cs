@@ -367,6 +367,97 @@ public class TelnetSessionTests
     private async Task<Command> ReadCommandAsync()
         => await _commands.Reader.ReadAsync(_cancellation.Token);
 
+    [Test]
+    public async Task SendRaw_ABytePastAscii_ReachesTheClientUntouched()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        // 255 is IAC. Put through UTF-8 encoding it would arrive as two bytes and mean
+        // nothing to the client.
+        session.SendRaw([255, 251, 1]);
+        var received = await ReadBytesFromClientAsync(3);
+
+        Assert.That(received, Is.EqualTo(new byte[] { 255, 251, 1 }));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
+    public async Task HideInput_TellsTheClientTheServerWillEcho()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        // IAC WILL ECHO. The client answers by stopping its own echo, and since the server
+        // then sends nothing back, what the player types is invisible.
+        session.HideInput();
+        var received = await ReadBytesFromClientAsync(3);
+
+        Assert.That(received, Is.EqualTo(new byte[] { 255, 251, 1 }));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
+    public async Task ShowInput_HandsEchoingBackToTheClient()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        session.ShowInput();
+        var received = await ReadBytesFromClientAsync(3);
+
+        Assert.That(received, Is.EqualTo(new byte[] { 255, 252, 1 }));
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    [Test]
+    public async Task SendRaw_ThenSend_KeepsTheOrder()
+    {
+        using var session = CreateSession();
+        var start = session.StartAsync(_cancellation.Token);
+
+        session.SendRaw([255, 251, 1]);
+        session.Send("after");
+        var received = await ReadBytesFromClientAsync(3 + "after\r\n".Length);
+
+        Assert.That(
+            received,
+            Is.EqualTo(new byte[] { 255, 251, 1, (byte)'a', (byte)'f', (byte)'t', (byte)'e', (byte)'r', 13, 10 })
+        );
+
+        await _cancellation.CancelAsync();
+        await start;
+    }
+
+    private async Task<byte[]> ReadBytesFromClientAsync(int wanted)
+    {
+        var stream = _connection.Client.GetStream();
+        var buffer = new byte[512];
+        var total = 0;
+
+        while (total < wanted)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), _cancellation.Token);
+
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        // Exactly what was asked for: one socket read can deliver more than that, and the
+        // assertion is about the next N bytes, not about everything that happened to arrive.
+        return buffer[..Math.Min(total, wanted)];
+    }
+
     private async Task<string> ReadFromClientAsync(int expectedLength = 0)
     {
         var stream = _connection.Client.GetStream();

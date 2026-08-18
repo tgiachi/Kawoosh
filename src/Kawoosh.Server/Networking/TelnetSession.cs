@@ -31,7 +31,7 @@ public sealed class TelnetSession : IDisposable
     private readonly ILogger _logger = Log.ForContext<TelnetSession>();
     private readonly TcpClient _client;
     private readonly ChannelWriter<Command> _commands;
-    private readonly Channel<OutboundMessage> _outbound;
+    private readonly Channel<byte[]> _outbound;
 
     public Guid Id { get; } = Guid.NewGuid();
 
@@ -48,7 +48,7 @@ public sealed class TelnetSession : IDisposable
     {
         _client = client;
         _commands = commands;
-        _outbound = Channel.CreateBounded<OutboundMessage>(
+        _outbound = Channel.CreateBounded<byte[]>(
             new BoundedChannelOptions(OutboundCapacity)
             {
                 FullMode = BoundedChannelFullMode.DropWrite,
@@ -61,14 +61,11 @@ public sealed class TelnetSession : IDisposable
     /// Terminates every line, not just the last. A screen arrives as one Send of many lines,
     /// and a client given a bare line feed mid-message staircases the rest of it.
     /// </summary>
-    private static byte[] Encode(OutboundMessage message)
+    private static byte[] Encode(string message, bool terminate)
     {
-        var normalised = message.Text
-                                .Replace(LineTerminator, "\n")
-                                .Replace('\r', '\n')
-                                .Replace("\n", LineTerminator);
+        var normalised = message.Replace(LineTerminator, "\n").Replace('\r', '\n').Replace("\n", LineTerminator);
 
-        return Encoding.UTF8.GetBytes(message.Terminate ? normalised + LineTerminator : normalised);
+        return Encoding.UTF8.GetBytes(terminate ? normalised + LineTerminator : normalised);
     }
 
     public void Dispose()
@@ -162,7 +159,7 @@ public sealed class TelnetSession : IDisposable
     /// </summary>
     public void Send(string message)
     {
-        Queue(new OutboundMessage(message, true));
+        Queue(Encode(message, true));
     }
 
     /// <summary>
@@ -171,12 +168,35 @@ public sealed class TelnetSession : IDisposable
     /// </summary>
     public void SendPrompt(string prompt)
     {
-        Queue(new OutboundMessage(prompt, false));
+        Queue(Encode(prompt, false));
     }
 
-    private void Queue(OutboundMessage message)
+    /// <summary>
+    /// Queues bytes exactly as given, with no encoding and no line handling. This is how
+    /// telnet negotiation reaches the client: byte 255 is a command, not text.
+    /// </summary>
+    public void SendRaw(byte[] payload)
     {
-        if (!_outbound.Writer.TryWrite(message))
+        ArgumentNullException.ThrowIfNull(payload);
+
+        Queue(payload);
+    }
+
+    /// <summary>Asks the client to stop showing what the player types.</summary>
+    public void HideInput()
+    {
+        SendRaw(TelnetProtocol.SuppressEcho());
+    }
+
+    /// <summary>Hands echoing back to the client.</summary>
+    public void ShowInput()
+    {
+        SendRaw(TelnetProtocol.RestoreEcho());
+    }
+
+    private void Queue(byte[] payload)
+    {
+        if (!_outbound.Writer.TryWrite(payload))
         {
             _logger.Debug("Session {SessionId} is closing, dropped an outbound message", Id);
         }
@@ -216,9 +236,7 @@ public sealed class TelnetSession : IDisposable
 
             await foreach (var message in _outbound.Reader.ReadAllAsync(cancellationToken))
             {
-                var payload = Encode(message);
-
-                await stream.WriteAsync(payload, cancellationToken);
+                await stream.WriteAsync(message, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
         }

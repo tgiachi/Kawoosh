@@ -18,6 +18,9 @@ public class SessionFlowServiceTests
     private const string NamePrompt = "Name? ";
     private const string PasswordPrompt = "Password: ";
 
+    /// <summary>IAC WILL ECHO and IAC WONT ECHO are three bytes each.</summary>
+    private const int NegotiationBytes = 3;
+
     private LoopbackConnection _connection = null!;
     private CancellationTokenSource _cancellation = null!;
     private TempMessageDirectory _directory = null!;
@@ -80,7 +83,7 @@ public class SessionFlowServiceTests
     {
         _flow.Handle(_session, "Thorin");
 
-        var received = await ReadAsync(PasswordPrompt);
+        var received = await ReadAsync(PasswordPrompt, NegotiationBytes);
 
         Assert.Multiple(() =>
         {
@@ -95,7 +98,7 @@ public class SessionFlowServiceTests
     {
         _flow.Handle(_session, "   Thorin   ");
 
-        await ReadAsync(PasswordPrompt);
+        await ReadAsync(PasswordPrompt, NegotiationBytes);
 
         Assert.That(_session.Character!.Name, Is.EqualTo("Thorin"));
     }
@@ -147,11 +150,11 @@ public class SessionFlowServiceTests
     public async Task Handle_AnyPassword_LetsThePlayerIn()
     {
         _flow.Handle(_session, "Thorin");
-        await ReadAsync(PasswordPrompt);
+        await ReadAsync(PasswordPrompt, NegotiationBytes);
 
         // Any password is accepted: there is no store to check one against yet.
         _flow.Handle(_session, "anything at all");
-        var received = await ReadAsync("Welcome, Thorin.\r\n");
+        var received = await ReadAsync("Welcome, Thorin.\r\n", NegotiationBytes);
 
         Assert.Multiple(() =>
         {
@@ -164,10 +167,10 @@ public class SessionFlowServiceTests
     public async Task Handle_AnEmptyPassword_IsAlsoAccepted()
     {
         _flow.Handle(_session, "Thorin");
-        await ReadAsync(PasswordPrompt);
+        await ReadAsync(PasswordPrompt, NegotiationBytes);
 
         _flow.Handle(_session, "");
-        await ReadAsync("Welcome, Thorin.\r\n");
+        await ReadAsync("Welcome, Thorin.\r\n", NegotiationBytes);
 
         Assert.That(_session.State, Is.EqualTo(SessionState.Playing));
     }
@@ -187,20 +190,43 @@ public class SessionFlowServiceTests
     public async Task Handle_ANameAtThePasswordPrompt_IsNotTakenAsANewName()
     {
         _flow.Handle(_session, "Thorin");
-        await ReadAsync(PasswordPrompt);
+        await ReadAsync(PasswordPrompt, NegotiationBytes);
 
         // "Bilbo" here is a password, not a second name: the state decides what a line means.
         _flow.Handle(_session, "Bilbo");
-        await ReadAsync("Welcome, Thorin.\r\n");
+        await ReadAsync("Welcome, Thorin.\r\n", NegotiationBytes);
 
         Assert.That(_session.Character!.Name, Is.EqualTo("Thorin"));
     }
 
-    private async Task<string> ReadAsync(string expected)
+    [Test]
+    public async Task Handle_AUsableName_AsksTheClientToStopEchoingBeforeThePasswordPrompt()
+    {
+        _flow.Handle(_session, "Thorin");
+
+        var received = await ReadBytesAsync(NegotiationBytes + PasswordPrompt.Length);
+
+        // IAC WILL ECHO must arrive before the prompt, or the first characters of the
+        // password are already on screen by the time the client stops.
+        Assert.That(received[..NegotiationBytes], Is.EqualTo(new byte[] { 255, 251, 1 }));
+    }
+
+    [Test]
+    public async Task Handle_APassword_GivesEchoingBackToTheClient()
+    {
+        _flow.Handle(_session, "Thorin");
+        await ReadAsync(PasswordPrompt, NegotiationBytes);
+
+        _flow.Handle(_session, "anything");
+        var received = await ReadBytesAsync(NegotiationBytes);
+
+        Assert.That(received, Is.EqualTo(new byte[] { 255, 252, 1 }));
+    }
+
+    private async Task<byte[]> ReadBytesAsync(int wanted)
     {
         var stream = _connection.Client.GetStream();
         var buffer = new byte[512];
-        var wanted = Encoding.UTF8.GetByteCount(expected);
         var total = 0;
 
         while (total < wanted)
@@ -215,6 +241,34 @@ public class SessionFlowServiceTests
             total += read;
         }
 
-        return Encoding.UTF8.GetString(buffer, 0, total);
+        // Exactly what was asked for: one socket read can deliver more than that, and the
+        // assertion is about the next N bytes, not about everything that happened to arrive.
+        return buffer[..Math.Min(total, wanted)];
+    }
+
+    /// <summary>
+    /// Reads the expected text, optionally past a number of leading bytes that are telnet
+    /// negotiation rather than text and would not survive being decoded.
+    /// </summary>
+    private async Task<string> ReadAsync(string expected, int skipBytes = 0)
+    {
+        var stream = _connection.Client.GetStream();
+        var buffer = new byte[512];
+        var wanted = skipBytes + Encoding.UTF8.GetByteCount(expected);
+        var total = 0;
+
+        while (total < wanted)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(total), _cancellation.Token);
+
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return Encoding.UTF8.GetString(buffer, skipBytes, Math.Max(0, total - skipBytes));
     }
 }
