@@ -25,7 +25,6 @@ namespace Kawoosh.Server.Provider;
  Singleton(typeof(IScreen), typeof(PasswordScreen)),
  Singleton(typeof(IScreen), typeof(WorldScreen)),
  Singleton(typeof(IMessageService), typeof(MessageService)),
- Singleton(typeof(ISessionFlowService), typeof(SessionFlowService)),
  Singleton(typeof(IGameLoopService), typeof(GameLoopService)),
  Singleton(typeof(ISessionInputRouter), typeof(SessionInputRouter)),
  Singleton(typeof(ITelnetListener), typeof(TelnetListener))

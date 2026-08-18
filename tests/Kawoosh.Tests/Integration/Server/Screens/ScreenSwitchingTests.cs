@@ -383,12 +383,29 @@ public class ScreenSwitchingTests
         await processing;
     }
 
+    [Test]
+    public async Task Input_BeforeAnySwitch_IsIgnored()
+    {
+        // A session with no screen has nowhere to send a line. It must not throw, and it must
+        // not stop the loop for anyone else.
+        using var loop = NewLoop(new RecordingScreen("one"));
+        var processing = loop.ProcessAsync(_cancellation.Token);
+
+        loop.Enqueue(new PlayerInputCommand(_session, "into the void"));
+        loop.Enqueue(new SwitchScreenCommand(_session, "one"));
+
+        // Only the switch produced output: the earlier line went nowhere.
+        var received = await ReadTextAsync("one:enter\r\n");
+
+        Assert.That(received, Is.EqualTo("one:enter\r\n"));
+
+        await _cancellation.CancelAsync();
+        await processing;
+    }
+
     private GameLoopService NewLoop(params IScreen[] screens)
     {
-        var messages = new MessageService(new VariableService());
-        messages.Load(_messageDirectory.RootPath, []);
-
-        return new GameLoopService(_art, new SessionFlowService(messages), new ScreenManager(screens));
+        return new GameLoopService(_art, new ScreenManager(screens));
     }
 
     private async Task<string> ReadTextAsync(string expected)

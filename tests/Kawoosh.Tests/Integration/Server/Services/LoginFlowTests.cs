@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Networking;
+using Kawoosh.Server.Screens;
 using Kawoosh.Server.Services;
 using Kawoosh.Tests.Support;
 
@@ -59,7 +60,12 @@ public class LoginFlowTests
         var messages = new MessageService(new VariableService());
         messages.Load(_messageDirectory.RootPath, []);
 
-        _loop = new GameLoopService(screens, new SessionFlowService(messages), new ScreenManager([]));
+        _loop = new GameLoopService(
+            screens,
+            new ScreenManager(
+                [new GreetingScreen(), new NameScreen(messages), new PasswordScreen(messages), new WorldScreen(messages)]
+            )
+        );
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
         _loopTask = _loop.ProcessAsync(_cancellation.Token);

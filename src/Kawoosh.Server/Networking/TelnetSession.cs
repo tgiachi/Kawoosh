@@ -5,7 +5,6 @@ using System.Threading.Channels;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Data.World;
 using Kawoosh.Server.Networking.Internal;
-using Kawoosh.Server.Types;
 using Serilog;
 
 namespace Kawoosh.Server.Networking;
@@ -39,12 +38,6 @@ public sealed class TelnetSession : IDisposable
     public Character? Character { get; set; }
 
     /// <summary>
-    /// Where this session is in the conversation. Only ever read and written on the game
-    /// loop's thread, which is why it needs no synchronisation.
-    /// </summary>
-    public SessionState State { get; set; } = SessionState.AwaitingName;
-
-    /// <summary>
     /// The screen this session is on, empty until the first switch. Only ever read and
     /// written on the game loop's thread, which is why it needs no synchronisation.
     /// </summary>
@@ -59,7 +52,7 @@ public sealed class TelnetSession : IDisposable
 
     /// <summary>
     /// The script this session is in the middle of, or null. Touched only on the game loop's
-    /// thread, like <see cref="State" />.
+    /// thread, like <see cref="ScreenName" />.
     /// </summary>
     internal Playback? Playback { get; set; }
 

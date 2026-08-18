@@ -9,6 +9,7 @@ using Kawoosh.Server.Data.Text;
 using Kawoosh.Server.Internal;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Networking.Internal;
+using Kawoosh.Server.Screens;
 
 namespace Kawoosh.Server.Services;
 
@@ -20,14 +21,11 @@ namespace Kawoosh.Server.Services;
 /// </summary>
 public sealed class GameLoopService : IGameLoopService, IDisposable
 {
-    private const string GreetingScreen = "greeting";
-
     private const int TickIntervalMilliseconds = 10;
     private const int WorldPulseMilliseconds = 250;
 
     private readonly ILogger _logger = Log.ForContext<GameLoopService>();
     private readonly IScreenService _screens;
-    private readonly ISessionFlowService _flow;
     private readonly IScreenManager _screenManager;
 
     // The channel is the thread-safe doorway; the queue behind it is touched only by the loop,
@@ -47,10 +45,9 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private long _sequence;
     private TimeSpan _lastPulseAt;
 
-    public GameLoopService(IScreenService screens, ISessionFlowService flow, IScreenManager screenManager)
+    public GameLoopService(IScreenService screens, IScreenManager screenManager)
     {
         _screens = screens;
-        _flow = flow;
         _screenManager = screenManager;
     }
 
@@ -179,12 +176,8 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
                     Advance(play);
 
                     break;
-                case BeginSessionFlowCommand begin:
-                    _flow.Begin(begin.Session);
-
-                    break;
                 case SessionConnectedCommand connected:
-                    ShowGreeting(connected.Session);
+                    SwitchScreen(new SwitchScreenCommand(connected.Session, GreetingScreen.ScreenName));
 
                     break;
                 case ShowScreenCommand show:
@@ -219,32 +212,16 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         Play(show.Session, Compile(show.ScreenName, art.ClearsScreen), null);
     }
 
-    private void ShowGreeting(TelnetSession session)
-    {
-        if (!_screens.TryGetArt(GreetingScreen, out var art))
-        {
-            // No banner is survivable; a session left with no prompt is not.
-            _logger.Warning("No screen named {ScreenName} to show", GreetingScreen);
-            _flow.Begin(session);
-
-            return;
-        }
-
-        Play(session, Compile(GreetingScreen, art.ClearsScreen), new BeginSessionFlowCommand(session));
-    }
-
     private void Input(TelnetSession session, string line)
     {
-        if (_screenManager.TryGetScreen(session.ScreenName, out var screen))
+        if (!_screenManager.TryGetScreen(session.ScreenName, out var screen))
         {
-            screen.OnInput(new ScreenContext(this, session), line);
+            _logger.Debug("Session {SessionId} is on no screen; ignoring {Line}", session.Id, line);
 
             return;
         }
 
-        // Task 5 deletes this arm: until the four screens are wired, a session that has not
-        // been switched anywhere is still driven by the old flow.
-        _flow.Handle(session, line);
+        screen.OnInput(new ScreenContext(this, session), line);
     }
 
     private void SwitchScreen(SwitchScreenCommand command)

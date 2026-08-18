@@ -5,7 +5,7 @@ using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Provider;
-using Kawoosh.Server.Types;
+using Kawoosh.Server.Screens;
 using Kawoosh.SGW.Interfaces;
 using Kawoosh.Tests.Support;
 
@@ -102,7 +102,7 @@ public class KawooshServiceProviderTests
 
         // This test is about the service graph, not the login conversation: a session already
         // in the world is what makes a typed line come back as an echo.
-        session.State = SessionState.Playing;
+        session.ScreenName = WorldScreen.ScreenName;
 
         var running = session.StartAsync(cancellation.Token);
         var routing = router.PumpAsync(commands.Reader, cancellation.Token);
