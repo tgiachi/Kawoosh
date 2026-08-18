@@ -39,7 +39,7 @@ public class ScreenServiceTests
 
         Assert.Multiple(() =>
         {
-            Assert.That(_screens.ScreenNames, Is.EquivalentTo(new[] { "greeting", "motd" }));
+            Assert.That(_screens.ArtNames, Is.EquivalentTo(new[] { "greeting", "motd" }));
             Assert.That(_screens.Render("greeting"), Is.EqualTo("WELCOME"));
         });
     }
@@ -74,7 +74,7 @@ public class ScreenServiceTests
 
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        Assert.That(_screens.ScreenNames, Is.EquivalentTo(new[] { "greeting" }));
+        Assert.That(_screens.ArtNames, Is.EquivalentTo(new[] { "greeting" }));
     }
 
     [Test]
@@ -151,12 +151,12 @@ public class ScreenServiceTests
     }
 
     [Test]
-    public void TryGetScreen_AKnownScreen_ExposesItsMetadata()
+    public void TryGetArt_AKnownScreen_ExposesItsMetadata()
     {
         _directory.Write("greeting.sgs", "@author Squid", "---", "WELCOME");
         _screens.Load(_directory.RootPath, NothingRequired);
 
-        var found = _screens.TryGetScreen("greeting", out var screen);
+        var found = _screens.TryGetArt("greeting", out var screen);
 
         Assert.Multiple(() =>
         {

@@ -198,19 +198,19 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void ShowScreen(ShowScreenCommand show)
     {
-        if (!_screens.TryGetScreen(show.ScreenName, out var screen))
+        if (!_screens.TryGetArt(show.ScreenName, out var art))
         {
             _logger.Warning("No screen named {ScreenName} to show", show.ScreenName);
 
             return;
         }
 
-        Play(show.Session, Compile(show.ScreenName, screen.ClearsScreen), null);
+        Play(show.Session, Compile(show.ScreenName, art.ClearsScreen), null);
     }
 
     private void ShowGreeting(TelnetSession session)
     {
-        if (!_screens.TryGetScreen(GreetingScreen, out var screen))
+        if (!_screens.TryGetArt(GreetingScreen, out var art))
         {
             // No banner is survivable; a session left with no prompt is not.
             _logger.Warning("No screen named {ScreenName} to show", GreetingScreen);
@@ -219,7 +219,7 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
             return;
         }
 
-        Play(session, Compile(GreetingScreen, screen.ClearsScreen), new BeginSessionFlowCommand(session));
+        Play(session, Compile(GreetingScreen, art.ClearsScreen), new BeginSessionFlowCommand(session));
     }
 
     /// <summary>

@@ -4,7 +4,7 @@ using Kawoosh.Server.Data.Screens;
 namespace Kawoosh.Server.Internal;
 
 /// <summary>
-/// Turns one .sgs file into a <see cref="Screen" />. Pure: no filesystem, so every edge of
+/// Turns one .sgs file into a <see cref="ScreenArt" />. Pure: no filesystem, so every edge of
 /// the format is testable without writing a file.
 /// </summary>
 internal static class ScreenParser
@@ -17,7 +17,7 @@ internal static class ScreenParser
     /// <paramref name="problems" />. Always returns a screen: the caller decides which
     /// problems are fatal.
     /// </summary>
-    public static Screen Parse(string name, string content, string sourceFile, ICollection<string> problems)
+    public static ScreenArt Parse(string name, string content, string sourceFile, ICollection<string> problems)
     {
         var lines = NormalizeLines(content);
         var metadata = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -38,7 +38,7 @@ internal static class ScreenParser
             problems.Add($"{sourceFile}:{bodyStart + 1}: screen body is empty");
         }
 
-        return new Screen(name, body, metadata, sourceFile);
+        return new ScreenArt(name, body, metadata, sourceFile);
     }
 
     /// <summary>

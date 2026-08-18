@@ -8,8 +8,8 @@ namespace Kawoosh.Server.Interfaces;
 /// </summary>
 public interface IScreenService
 {
-    /// <summary>Every loaded screen name.</summary>
-    IReadOnlyCollection<string> ScreenNames { get; }
+    /// <summary>Every loaded screen's art, by name.</summary>
+    IReadOnlyCollection<string> ArtNames { get; }
 
     /// <summary>
     /// Reads every .sgs file in a directory, keyed by file name without extension.
@@ -27,10 +27,10 @@ public interface IScreenService
     /// <exception cref="InvalidOperationException"><see cref="Load" /> has not run.</exception>
     void Reload();
 
-    /// <summary>Finds a screen and its metadata without rendering it.</summary>
+    /// <summary>Finds a screen's art and metadata without rendering it.</summary>
     /// <param name="name">Screen name, matched without regard to case.</param>
-    /// <param name="screen">The screen, when one is loaded under that name.</param>
-    bool TryGetScreen(string name, [MaybeNullWhen(false)] out Screen screen);
+    /// <param name="art">The art, when a .sgs is loaded under that name.</param>
+    bool TryGetArt(string name, [MaybeNullWhen(false)] out ScreenArt art);
 
     /// <summary>
     /// Renders a screen, substituting variables now rather than at load, because a value
