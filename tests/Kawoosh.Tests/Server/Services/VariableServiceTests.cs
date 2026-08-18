@@ -69,12 +69,14 @@ public class VariableServiceTests
         var calls = 0;
         _variables.AddVariableBuilder("count", () => ++calls);
 
-        Assert.Multiple(() =>
-        {
-            Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("1"));
-            Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("2"));
-            Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("3"));
-        });
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("1"));
+                Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("2"));
+                Assert.That(_variables.TranslateText("{count}"), Is.EqualTo("3"));
+            }
+        );
     }
 
     [Test]
@@ -183,11 +185,13 @@ public class VariableServiceTests
     [Test]
     public void TranslateText_AnUnmatchedBrace_IsLeftAlone()
     {
-        Assert.Multiple(() =>
-        {
-            Assert.That(_variables.TranslateText("{unclosed"), Is.EqualTo("{unclosed"));
-            Assert.That(_variables.TranslateText("unopened}"), Is.EqualTo("unopened}"));
-        });
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(_variables.TranslateText("{unclosed"), Is.EqualTo("{unclosed"));
+                Assert.That(_variables.TranslateText("unopened}"), Is.EqualTo("unopened}"));
+            }
+        );
     }
 
     // ------------------------------------------------------------- culture
@@ -216,12 +220,14 @@ public class VariableServiceTests
     [Test]
     public void AddVariable_WithABlankName_IsRejected()
     {
-        Assert.Multiple(() =>
-        {
-            Assert.That(() => _variables.AddVariable("", 1), Throws.ArgumentException);
-            Assert.That(() => _variables.AddVariable("  ", 1), Throws.ArgumentException);
-            Assert.That(() => _variables.AddVariable("name", null!), Throws.ArgumentNullException);
-        });
+        Assert.Multiple(
+            () =>
+            {
+                Assert.That(() => _variables.AddVariable("", 1), Throws.ArgumentException);
+                Assert.That(() => _variables.AddVariable("  ", 1), Throws.ArgumentException);
+                Assert.That(() => _variables.AddVariable("name", null!), Throws.ArgumentNullException);
+            }
+        );
     }
 
     [Test]
