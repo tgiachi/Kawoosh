@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Serilog;
 using Kawoosh.Server.Data.Commands;
+using Kawoosh.Server.Data.Screens;
 using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Data.Text;
 using Kawoosh.Server.Internal;
@@ -27,6 +28,7 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private readonly ILogger _logger = Log.ForContext<GameLoopService>();
     private readonly IScreenService _screens;
     private readonly ISessionFlowService _flow;
+    private readonly IScreenManager _screenManager;
 
     // The channel is the thread-safe doorway; the queue behind it is touched only by the loop,
     // so the scheduling order needs no lock.
@@ -45,10 +47,11 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private long _sequence;
     private TimeSpan _lastPulseAt;
 
-    public GameLoopService(IScreenService screens, ISessionFlowService flow)
+    public GameLoopService(IScreenService screens, ISessionFlowService flow, IScreenManager screenManager)
     {
         _screens = screens;
         _flow = flow;
+        _screenManager = screenManager;
     }
 
     /// <inheritdoc />
@@ -161,7 +164,15 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
                     break;
                 case PlayerInputCommand input:
-                    _flow.Handle(input.Session, input.Text);
+                    Input(input.Session, input.Text);
+
+                    break;
+                case SwitchScreenCommand switchTo:
+                    SwitchScreen(switchTo);
+
+                    break;
+                case ScreenEnteredCommand entered:
+                    EnterScreen(entered);
 
                     break;
                 case PlayScriptCommand play:
@@ -220,6 +231,81 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
         }
 
         Play(session, Compile(GreetingScreen, art.ClearsScreen), new BeginSessionFlowCommand(session));
+    }
+
+    private void Input(TelnetSession session, string line)
+    {
+        if (_screenManager.TryGetScreen(session.ScreenName, out var screen))
+        {
+            screen.OnInput(new ScreenContext(this, session), line);
+
+            return;
+        }
+
+        // Task 5 deletes this arm: until the four screens are wired, a session that has not
+        // been switched anywhere is still driven by the old flow.
+        _flow.Handle(session, line);
+    }
+
+    private void SwitchScreen(SwitchScreenCommand command)
+    {
+        if (!_screenManager.TryGetScreen(command.ScreenName, out var next))
+        {
+            // A session on no screen is a live socket that answers nothing, so a bad switch
+            // leaves it where it was.
+            _logger.Error(
+                "No screen named {ScreenName}; session {SessionId} stays on {CurrentScreen}",
+                command.ScreenName,
+                command.Session.Id,
+                command.Session.ScreenName
+            );
+
+            return;
+        }
+
+        var context = new ScreenContext(this, command.Session);
+
+        if (_screenManager.TryGetScreen(command.Session.ScreenName, out var current))
+        {
+            current.OnExit(context);
+        }
+
+        // The screen's own name, not the one asked for, so the session records it in one case.
+        command.Session.ScreenName = next.Name;
+
+        Play(command.Session, ArtFor(next.Name), new ScreenEnteredCommand(command.Session, next.Name));
+    }
+
+    private void EnterScreen(ScreenEnteredCommand command)
+    {
+        // The session may have switched again while the art played; entering a screen it has
+        // already left would put it in two places at once.
+        if (!string.Equals(command.Session.ScreenName, command.ScreenName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (_screenManager.TryGetScreen(command.ScreenName, out var screen))
+        {
+            screen.OnEnter(new ScreenContext(this, command.Session));
+        }
+    }
+
+    /// <summary>
+    /// Compiles the art for a screen. A screen with no .sgs compiles an empty string, which
+    /// is an empty script — and Play runs the continuation immediately for one of those, so a
+    /// screen with art and a screen without take the same path.
+    /// </summary>
+    private TextScript ArtFor(string screenName)
+    {
+        if (!_screens.TryGetArt(screenName, out var art))
+        {
+            return TextScriptCompiler.Compile("");
+        }
+
+        var text = _screens.Render(screenName);
+
+        return TextScriptCompiler.Compile(art.ClearsScreen ? AnsiControl.ClearScreen + text : text);
     }
 
     /// <summary>

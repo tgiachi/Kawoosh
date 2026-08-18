@@ -59,7 +59,7 @@ public class LoginFlowTests
         var messages = new MessageService(new VariableService());
         messages.Load(_messageDirectory.RootPath, []);
 
-        _loop = new GameLoopService(screens, new SessionFlowService(messages));
+        _loop = new GameLoopService(screens, new SessionFlowService(messages), new ScreenManager([]));
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
         _loopTask = _loop.ProcessAsync(_cancellation.Token);

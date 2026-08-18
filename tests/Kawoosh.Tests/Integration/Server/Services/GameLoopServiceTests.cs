@@ -33,7 +33,7 @@ public class GameLoopServiceTests
         _connection = new LoopbackConnection();
         _cancellation = new CancellationTokenSource(TimeoutMilliseconds);
         _screens = new ScreenService(new VariableService());
-        _gameLoop = new GameLoopService(_screens, NewFlow());
+        _gameLoop = new GameLoopService(_screens, NewFlow(), new ScreenManager([]));
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
 
@@ -232,7 +232,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(variables);
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
@@ -255,7 +255,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
@@ -279,7 +279,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "inline"));
@@ -569,7 +569,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_OnALoopThatNeverRan_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
+        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow(), new ScreenManager([]));
 
         Assert.That(loop.Dispose, Throws.Nothing);
     }
@@ -577,7 +577,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
+        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow(), new ScreenManager([]));
         loop.Dispose();
 
         Assert.That(loop.Dispose, Throws.Nothing);
@@ -596,7 +596,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
         var elapsed = Stopwatch.StartNew();
 
@@ -629,7 +629,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "intro"));
@@ -666,7 +666,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "intro"));
@@ -691,7 +691,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        using var loop = new GameLoopService(screens, NewFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "slow"));
@@ -724,7 +724,7 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewPromptingFlow());
+        using var loop = new GameLoopService(screens, NewPromptingFlow(), new ScreenManager([]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new SessionConnectedCommand(_session));

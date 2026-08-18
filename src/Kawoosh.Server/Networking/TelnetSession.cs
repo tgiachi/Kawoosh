@@ -45,6 +45,12 @@ public sealed class TelnetSession : IDisposable
     public SessionState State { get; set; } = SessionState.AwaitingName;
 
     /// <summary>
+    /// The screen this session is on, empty until the first switch. Only ever read and
+    /// written on the game loop's thread, which is why it needs no synchronisation.
+    /// </summary>
+    public string ScreenName { get; set; } = "";
+
+    /// <summary>
     /// The script this session is in the middle of, or null. Touched only on the game loop's
     /// thread, like <see cref="State" />.
     /// </summary>
