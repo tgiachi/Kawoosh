@@ -5,7 +5,6 @@ using System.Threading.Channels;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Data.World;
 using Kawoosh.Server.Networking.Internal;
-using Kawoosh.Server.Types;
 using Serilog;
 
 namespace Kawoosh.Server.Networking;
@@ -39,14 +38,29 @@ public sealed class TelnetSession : IDisposable
     public Character? Character { get; set; }
 
     /// <summary>
-    /// Where this session is in the conversation. Only ever read and written on the game
-    /// loop's thread, which is why it needs no synchronisation.
+    /// The screen this session is on, empty until the first switch. Only ever read and
+    /// written on the game loop's thread, which is why it needs no synchronisation.
     /// </summary>
-    public SessionState State { get; set; } = SessionState.AwaitingName;
+    public string ScreenName { get; set; } = "";
+
+    /// <summary>
+    /// Counts switches, so a queued entry can tell whether it still belongs to the session's
+    /// current screen rather than one it has since left. Like <see cref="ScreenName" />, it
+    /// is touched only on the game loop's thread.
+    /// </summary>
+    public long ScreenGeneration { get; set; }
+
+    /// <summary>
+    /// Counts switches queued but not yet landed, so input is held back while any is still
+    /// outstanding — a line racing them would otherwise reach the screen the session is
+    /// leaving, or a half-switched-to one that has not shown its own prompt yet. Like
+    /// <see cref="ScreenName" />, it is touched only on the game loop's thread.
+    /// </summary>
+    public int SwitchesInFlight { get; set; }
 
     /// <summary>
     /// The script this session is in the middle of, or null. Touched only on the game loop's
-    /// thread, like <see cref="State" />.
+    /// thread, like <see cref="ScreenName" />.
     /// </summary>
     internal Playback? Playback { get; set; }
 

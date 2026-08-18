@@ -3,11 +3,13 @@ using System.Diagnostics;
 using System.Threading.Channels;
 using Serilog;
 using Kawoosh.Server.Data.Commands;
+using Kawoosh.Server.Data.Screens;
 using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Data.Text;
 using Kawoosh.Server.Internal;
 using Kawoosh.Server.Networking;
 using Kawoosh.Server.Networking.Internal;
+using Kawoosh.Server.Screens;
 
 namespace Kawoosh.Server.Services;
 
@@ -19,14 +21,12 @@ namespace Kawoosh.Server.Services;
 /// </summary>
 public sealed class GameLoopService : IGameLoopService, IDisposable
 {
-    private const string GreetingScreen = "greeting";
-
     private const int TickIntervalMilliseconds = 10;
     private const int WorldPulseMilliseconds = 250;
 
     private readonly ILogger _logger = Log.ForContext<GameLoopService>();
     private readonly IScreenService _screens;
-    private readonly ISessionFlowService _flow;
+    private readonly IScreenManager _screenManager;
 
     // The channel is the thread-safe doorway; the queue behind it is touched only by the loop,
     // so the scheduling order needs no lock.
@@ -45,10 +45,10 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
     private long _sequence;
     private TimeSpan _lastPulseAt;
 
-    public GameLoopService(IScreenService screens, ISessionFlowService flow)
+    public GameLoopService(IScreenService screens, IScreenManager screenManager)
     {
         _screens = screens;
-        _flow = flow;
+        _screenManager = screenManager;
     }
 
     /// <inheritdoc />
@@ -161,19 +161,23 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
                     break;
                 case PlayerInputCommand input:
-                    _flow.Handle(input.Session, input.Text);
+                    Input(input.Session, input.Text);
+
+                    break;
+                case SwitchScreenCommand switchTo:
+                    SwitchScreen(switchTo);
+
+                    break;
+                case ScreenEnteredCommand entered:
+                    EnterScreen(entered);
 
                     break;
                 case PlayScriptCommand play:
                     Advance(play);
 
                     break;
-                case BeginSessionFlowCommand begin:
-                    _flow.Begin(begin.Session);
-
-                    break;
                 case SessionConnectedCommand connected:
-                    ShowGreeting(connected.Session);
+                    SwitchScreen(new SwitchScreenCommand(connected.Session, GreetingScreen.ScreenName));
 
                     break;
                 case ShowScreenCommand show:
@@ -198,39 +202,156 @@ public sealed class GameLoopService : IGameLoopService, IDisposable
 
     private void ShowScreen(ShowScreenCommand show)
     {
-        if (!_screens.TryGetScreen(show.ScreenName, out var screen))
+        if (!_screens.TryGetArt(show.ScreenName, out _))
         {
             _logger.Warning("No screen named {ScreenName} to show", show.ScreenName);
 
             return;
         }
 
-        Play(show.Session, Compile(show.ScreenName, screen.ClearsScreen), null);
+        Play(show.Session, ArtFor(show.ScreenName), null);
     }
 
-    private void ShowGreeting(TelnetSession session)
+    private void Input(TelnetSession session, string line)
     {
-        if (!_screens.TryGetScreen(GreetingScreen, out var screen))
+        // One or more switches were queued for this session but have not fully landed yet.
+        // Delivering the line now could hand it to the screen the session is leaving, or to
+        // the one it is going to before that screen's own OnEnter — and therefore its prompt
+        // — has run. So it goes back on the queue instead, behind whichever step of the
+        // switch is still ahead of it; each step it waits behind is one it cannot loop past,
+        // so this terminates rather than requeuing forever.
+        if (session.SwitchesInFlight > 0)
         {
-            // No banner is survivable; a session left with no prompt is not.
-            _logger.Warning("No screen named {ScreenName} to show", GreetingScreen);
-            _flow.Begin(session);
+            Enqueue(new PlayerInputCommand(session, line));
 
             return;
         }
 
-        Play(session, Compile(GreetingScreen, screen.ClearsScreen), new BeginSessionFlowCommand(session));
+        if (!_screenManager.TryGetScreen(session.ScreenName, out var screen))
+        {
+            _logger.Debug("Session {SessionId} is on no screen; ignoring {Line}", session.Id, line);
+
+            return;
+        }
+
+        screen.OnInput(new ScreenContext(this, session), line);
+    }
+
+    private void SwitchScreen(SwitchScreenCommand command)
+    {
+        if (!_screenManager.TryGetScreen(command.ScreenName, out var next))
+        {
+            // A session on no screen is a live socket that answers nothing, so a bad switch
+            // leaves it where it was. Decremented here because a failed switch has no OnEnter
+            // coming to account for its increment later: nothing else is left in flight to
+            // wait on.
+            ResolveSwitch(command.Session);
+
+            _logger.Error(
+                "No screen named {ScreenName}; session {SessionId} stays on {CurrentScreen}",
+                command.ScreenName,
+                command.Session.Id,
+                command.Session.ScreenName
+            );
+
+            return;
+        }
+
+        var context = new ScreenContext(this, command.Session);
+
+        if (_screenManager.TryGetScreen(command.Session.ScreenName, out var current))
+        {
+            try
+            {
+                current.OnExit(context);
+            }
+            catch (Exception exception)
+            {
+                // Dispatch's own catch would otherwise swallow this and skip everything below
+                // it, including the decrement — stranding the session with input held back
+                // forever. Logged and decremented here instead, so a throwing OnExit abandons
+                // the switch without freezing the session it belongs to.
+                _logger.Error(
+                    exception,
+                    "Screen {ScreenName} threw from OnExit; session {SessionId} stays on it",
+                    current.Name,
+                    command.Session.Id
+                );
+
+                ResolveSwitch(command.Session);
+
+                return;
+            }
+        }
+
+        // The screen's own name, not the one asked for, so the session records it in one case.
+        command.Session.ScreenName = next.Name;
+        command.Session.ScreenGeneration++;
+
+        Play(
+            command.Session,
+            ArtFor(next.Name),
+            new ScreenEnteredCommand(command.Session, next.Name, command.Session.ScreenGeneration)
+        );
+    }
+
+    private void EnterScreen(ScreenEnteredCommand command)
+    {
+        // Decremented first, stale or not: this entry still holds the increment Switch made
+        // for it, and a stale entry has no other point in its life where that gets undone. If
+        // this ran after the guard below instead, a stale entry would return before reaching
+        // it and the count would never work its way back down to zero.
+        ResolveSwitch(command.Session);
+
+        // This is the reason ScreenGeneration exists: the session may have switched again
+        // since this entry was queued — possibly back to a screen of the same name — and a
+        // name alone cannot tell "still the switch that queued me" from "a later switch that
+        // happens to agree on where it went". Only the generation can, because it changes on
+        // every switch regardless of the name involved.
+        if (command.Session.ScreenGeneration != command.Generation)
+        {
+            return;
+        }
+
+        if (_screenManager.TryGetScreen(command.ScreenName, out var screen))
+        {
+            screen.OnEnter(new ScreenContext(this, command.Session));
+        }
     }
 
     /// <summary>
-    /// Renders a screen and compiles it. The clear goes in before compiling, so it belongs to
-    /// the first step and cannot be seen apart from the art it clears for.
+    /// Resolves one switch's share of <see cref="TelnetSession.SwitchesInFlight" />, floored
+    /// at zero. A switch queued directly rather than through <see cref="ScreenContext.Switch" />
+    /// — a session's very first, or one built straight from a command in a test — never
+    /// incremented the count in the first place. Without the floor, resolving it would still
+    /// decrement, leaving the count permanently negative; a later, real switch would then
+    /// have to climb out of that hole before the count could read positive again, so a second
+    /// switch queued alongside it could resolve first and read the count as idle while the
+    /// first was still outstanding.
     /// </summary>
-    private TextScript Compile(string screenName, bool clearsScreen)
+    private static void ResolveSwitch(TelnetSession session)
     {
+        if (session.SwitchesInFlight > 0)
+        {
+            session.SwitchesInFlight--;
+        }
+    }
+
+    /// <summary>
+    /// Compiles the art for a screen. A screen with no .sgs compiles an empty string, which
+    /// is an empty script — and Play runs the continuation immediately for one of those, so a
+    /// screen with art and a screen without take the same path.
+    /// </summary>
+    private TextScript ArtFor(string screenName)
+    {
+        if (!_screens.TryGetArt(screenName, out var art))
+        {
+            return TextScriptCompiler.Compile("");
+        }
+
         var text = _screens.Render(screenName);
 
-        return TextScriptCompiler.Compile(clearsScreen ? AnsiControl.ClearScreen + text : text);
+        return TextScriptCompiler.Compile(art.ClearsScreen ? AnsiControl.ClearScreen + text : text);
     }
 
     /// <summary>

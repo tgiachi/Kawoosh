@@ -5,8 +5,8 @@ using Kawoosh.Server.Data.Commands;
 using Kawoosh.Server.Data.Network;
 using Kawoosh.Server.Interfaces;
 using Kawoosh.Server.Networking;
+using Kawoosh.Server.Screens;
 using Kawoosh.Server.Services;
-using Kawoosh.Server.Types;
 using Kawoosh.Tests.Support;
 
 namespace Kawoosh.Tests.Integration.Server.Services;
@@ -33,13 +33,15 @@ public class GameLoopServiceTests
         _connection = new LoopbackConnection();
         _cancellation = new CancellationTokenSource(TimeoutMilliseconds);
         _screens = new ScreenService(new VariableService());
-        _gameLoop = new GameLoopService(_screens, NewFlow());
+
+        var messages = new MessageService(new VariableService());
+        _gameLoop = new GameLoopService(_screens, new ScreenManager([new WorldScreen(messages)]));
         _session = new TelnetSession(_connection.Server, Channel.CreateUnbounded<Command>().Writer);
         _sessionTask = _session.StartAsync(_cancellation.Token);
 
-        // These tests are about the loop, not the login conversation: a session already in
-        // the world is what makes an input command reach the echo the assertions read.
-        _session.State = SessionState.Playing;
+        // These tests are about the loop, not the login conversation: a session already on
+        // the world screen is what makes an input command reach the echo the assertions read.
+        _session.ScreenName = "world";
     }
 
     [TearDown]
@@ -232,7 +234,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(variables);
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
@@ -255,7 +258,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "welcome"));
@@ -279,7 +283,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "inline"));
@@ -569,7 +574,7 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_OnALoopThatNeverRan_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
+        var loop = new GameLoopService(new ScreenService(new VariableService()), new ScreenManager([]));
 
         Assert.That(loop.Dispose, Throws.Nothing);
     }
@@ -577,16 +582,12 @@ public class GameLoopServiceTests
     [Test]
     public void Dispose_CalledTwice_DoesNotThrow()
     {
-        var loop = new GameLoopService(new ScreenService(new VariableService()), NewFlow());
+        var loop = new GameLoopService(new ScreenService(new VariableService()), new ScreenManager([]));
         loop.Dispose();
 
         Assert.That(loop.Dispose, Throws.Nothing);
     }
 
-    /// <summary>
-    /// A real flow over an unloaded message store: the in-world branch these tests exercise
-    /// renders no message, so nothing has to be on disk.
-    /// </summary>
     [Test]
     public async Task ProcessAsync_AScreenWithADelay_ArrivesInPiecesOverTime()
     {
@@ -596,7 +597,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
         var elapsed = Stopwatch.StartNew();
 
@@ -629,7 +631,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "intro"));
@@ -666,7 +669,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "intro"));
@@ -691,7 +695,8 @@ public class GameLoopServiceTests
         var screens = new ScreenService(new VariableService());
         screens.Load(directory.RootPath, []);
 
-        using var loop = new GameLoopService(screens, NewFlow());
+        var messages = new MessageService(new VariableService());
+        using var loop = new GameLoopService(screens, new ScreenManager([new WorldScreen(messages)]));
         var processing = loop.ProcessAsync(_cancellation.Token);
 
         loop.Enqueue(new ShowScreenCommand(_session, "slow"));
@@ -711,50 +716,6 @@ public class GameLoopServiceTests
 
         await _cancellation.CancelAsync();
         await processing;
-    }
-
-    [Test]
-    public async Task ProcessAsync_AConnectingSession_GetsTheGreetingBeforeTheFirstPrompt()
-    {
-        // The continuation exists for exactly this: a timed greeting must finish before the
-        // flow's prompt, or the player is asked their name over the top of the banner.
-        using var directory = new TempScreenDirectory();
-        directory.Write("greeting.sgs", "BANNER", "@delay 200", "MORE");
-
-        var screens = new ScreenService(new VariableService());
-        screens.Load(directory.RootPath, []);
-
-        using var loop = new GameLoopService(screens, NewPromptingFlow());
-        var processing = loop.ProcessAsync(_cancellation.Token);
-
-        loop.Enqueue(new SessionConnectedCommand(_session));
-
-        var received = await ReadFromClientAsync("BANNER\r\nMORE\r\nPROMPT");
-
-        Assert.That(received, Is.EqualTo("BANNER\r\nMORE\r\nPROMPT"));
-
-        await _cancellation.CancelAsync();
-        await processing;
-    }
-
-    /// <summary>
-    /// A flow whose first prompt is the literal "PROMPT" and carries no terminator, so a test
-    /// can assert where it lands relative to the screen that precedes it.
-    /// </summary>
-    private static SessionFlowService NewPromptingFlow()
-    {
-        using var directory = new TempMessageDirectory();
-        directory.Write("login.sgm", "login.name-prompt = PROMPT");
-
-        var messages = new MessageService(new VariableService());
-        messages.Load(directory.RootPath, []);
-
-        return new SessionFlowService(messages);
-    }
-
-    private static SessionFlowService NewFlow()
-    {
-        return new SessionFlowService(new MessageService(new VariableService()));
     }
 
     /// <summary>Reads exactly as many bytes as <paramref name="expected" /> occupies in UTF-8.</summary>

@@ -18,7 +18,7 @@ public sealed class ScreenService : IScreenService
     private readonly ILogger _logger = Log.ForContext<ScreenService>();
     private readonly IVariableService _variables;
 
-    private Dictionary<string, Screen> _screens = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, ScreenArt> _screens = new(StringComparer.OrdinalIgnoreCase);
     private string? _directoryPath;
     private IReadOnlyCollection<string> _requiredScreens = [];
 
@@ -27,7 +27,7 @@ public sealed class ScreenService : IScreenService
         _variables = variables;
     }
 
-    public IReadOnlyCollection<string> ScreenNames => _screens.Keys;
+    public IReadOnlyCollection<string> ArtNames => _screens.Keys;
 
     public void Load(string directoryPath, IReadOnlyCollection<string> requiredScreens)
     {
@@ -56,9 +56,9 @@ public sealed class ScreenService : IScreenService
         _logger.Information("Reloaded {ScreenCount} screens from {DirectoryPath}", loaded.Count, directoryPath);
     }
 
-    public bool TryGetScreen(string name, [MaybeNullWhen(false)] out Screen screen)
+    public bool TryGetArt(string name, [MaybeNullWhen(false)] out ScreenArt art)
     {
-        return _screens.TryGetValue(name, out screen);
+        return _screens.TryGetValue(name, out art);
     }
 
     public string Render(string name)
@@ -68,7 +68,7 @@ public sealed class ScreenService : IScreenService
                    : _variables.TranslateText(screen.Body);
     }
 
-    private static Dictionary<string, Screen> ReadDirectory(
+    private static Dictionary<string, ScreenArt> ReadDirectory(
         string directoryPath,
         IReadOnlyCollection<string> requiredScreens
     )
@@ -78,7 +78,7 @@ public sealed class ScreenService : IScreenService
             throw new DirectoryNotFoundException($"Screen directory not found: {directoryPath}");
         }
 
-        var screens = new Dictionary<string, Screen>(StringComparer.OrdinalIgnoreCase);
+        var screens = new Dictionary<string, ScreenArt>(StringComparer.OrdinalIgnoreCase);
         var problems = new List<string>();
 
         var files = Directory
